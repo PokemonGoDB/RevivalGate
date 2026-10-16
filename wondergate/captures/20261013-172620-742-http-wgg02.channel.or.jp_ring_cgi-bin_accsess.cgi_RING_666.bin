@@ -1,0 +1,4 @@
+GET /ring/cgi-bin/accsess.cgi?RING=666 HTTP/1.1
+Host: wgg02.channel.or.jp
+User-Agent: SWAN/1.0
+

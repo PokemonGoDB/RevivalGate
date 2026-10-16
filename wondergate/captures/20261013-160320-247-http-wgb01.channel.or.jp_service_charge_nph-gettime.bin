@@ -1,0 +1,4 @@
+POST http://wgb01.channel.or.jp/service/charge/nph-gettime HTTP/1.1
+Host: wgb01.channel.or.jp
+User-Agent: SWAN/1.0
+

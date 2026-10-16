@@ -1,0 +1,5 @@
+POST /swan-ranking HTTP/1.1
+Host: heaven.wgg.channel.or.jp
+Content-Length: 34
+
+*=ZZZZZZ&owner=QWXZ&score=1|012345

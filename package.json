@@ -1,0 +1,19 @@
+{
+  "name": "revivalgate",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.1.1",
+  "scripts": {
+    "wg:check": "tsc -p workers/wondergate",
+    "wg:dev": "wrangler dev -c workers/wondergate/wrangler.jsonc --port 8790 --persist-to .wrangler/state",
+    "wg:migrate": "wrangler d1 migrations apply swanrevival-wondergate --local -c workers/wondergate/wrangler.jsonc",
+    "wg:sync": "node scripts/wg-sync.mjs",
+    "wg:conformance": "node scripts/wg-conformance.mjs",
+    "test": "node --test 'tests/*.test.mjs'"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261012.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.150.0"
+  }
+}

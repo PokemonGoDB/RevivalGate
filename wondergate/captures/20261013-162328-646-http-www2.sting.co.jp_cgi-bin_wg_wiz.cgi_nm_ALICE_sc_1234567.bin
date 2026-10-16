@@ -1,0 +1,4 @@
+GET /cgi-bin/wg/wiz.cgi?nm=ALICE&sc=1234567 HTTP/1.1
+Host: www2.sting.co.jp
+User-Agent: SWAN/1.0
+

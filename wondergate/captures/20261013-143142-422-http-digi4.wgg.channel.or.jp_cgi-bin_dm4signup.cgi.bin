@@ -1,0 +1,8 @@
+POST /cgi-bin/dm4signup.cgi HTTP/1.1
+Host: digi4.wgg.channel.or.jp
+User-Agent: SWAN/1.0 DIGIMON-04
+Content-Type: application/x-www-from-urlencoded
+Content-Length: 9
+
+
+ÿÿÿÿÿÿ

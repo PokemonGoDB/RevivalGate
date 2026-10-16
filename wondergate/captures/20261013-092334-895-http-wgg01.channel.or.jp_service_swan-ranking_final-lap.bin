@@ -1,0 +1,5 @@
+POST http://wgg01.channel.or.jp/service/swan-ranking/final-lap HTTP/1.1
+Host: wgg01.channel.or.jp
+Content-Length: 307
+
+*=ZZZZZZZZ&owner=QWX&score=1|10111|0|&score=2|10222|0|&score=3|10333|0|&score=4|10444|0|&score=5|10555|0|&score=6|10666|0|&score=7|10777|0|&score=8|10888|0|&score=9|10999|0|&score=10|11110|0|&score=11|11221|0|&score=12|11332|0|&score=13|11443|0|&score=14|11554|0|&score=15|11665|0|&score=16|11776|0|&group=1

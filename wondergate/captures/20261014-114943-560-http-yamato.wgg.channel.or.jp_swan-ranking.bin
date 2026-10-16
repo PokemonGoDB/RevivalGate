@@ -1,0 +1,7 @@
+POST http://yamato.wgg.channel.or.jp/swan-ranking HTTP/1.1
+Host: yamato.wgg.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 57
+
+*=00FFFF&owner=NO NAME &score=1|26772|&list=yamato|1|50

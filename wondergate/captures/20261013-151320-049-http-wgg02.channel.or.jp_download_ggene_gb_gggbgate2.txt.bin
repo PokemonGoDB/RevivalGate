@@ -1,0 +1,3 @@
+GET /download/ggene_gb/gggbgate2.txt HTTP/1.1
+Host: wgg02.channel.or.jp
+

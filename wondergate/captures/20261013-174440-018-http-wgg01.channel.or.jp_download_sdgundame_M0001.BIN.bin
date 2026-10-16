@@ -1,0 +1,5 @@
+HEAD /download/sdgundame/M0001.BIN HTTP/1.1
+Host: wgg01.channel.or.jp
+User-Agent: SWAN/1.0
+Connection: keep-alive
+

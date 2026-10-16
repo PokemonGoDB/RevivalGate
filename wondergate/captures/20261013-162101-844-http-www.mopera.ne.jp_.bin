@@ -1,0 +1,4 @@
+GET / HTTP/1.0
+Host: www.mopera.ne.jp
+User-Agent: SWAN/1.0
+

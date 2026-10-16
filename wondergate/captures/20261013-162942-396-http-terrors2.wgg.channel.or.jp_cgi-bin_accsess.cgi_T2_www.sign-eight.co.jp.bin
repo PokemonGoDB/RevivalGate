@@ -1,0 +1,4 @@
+GET /cgi-bin/accsess.cgi?T2=www.sign-eight.co.jp HTTP/1.1
+Host: terrors2.wgg.channel.or.jp
+User-Agent: SWAN/1.0
+

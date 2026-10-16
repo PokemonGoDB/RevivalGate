@@ -1,0 +1,34 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "swanrevival-wondergate",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  // CPU per invocation (a tunnel is one). A game session uses tens of milliseconds (a mail setup's
+  // PBKDF2 is the most); this stops an abusive tunnel well before the 30 s default.
+  "limits": { "cpu_ms": 5000 },
+  "routes": [{ "pattern": "wg.swanrevival.com", "custom_domain": true }],
+  // Static downloads for the games (map packs). Synced from the game server repo by
+  // scripts/wg-sync.mjs; only the Worker reads them, so they aren't public URLs.
+  "assets": {
+    "directory": "./content",
+    "binding": "CONTENT",
+    "run_worker_first": true
+  },
+  "ratelimits": [
+    { "name": "LINK_LIMITER", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } },
+    { "name": "TUNNEL_LIMITER", "namespace_id": "1004", "simple": { "limit": 300, "period": 60 } },
+    // Score uploads, game-state writes and mail per address (limits.ts). A game session writes a few
+    // times; Dark Eyes' once-a-second battle polls aren't counted.
+    { "name": "WRITE_LIMITER", "namespace_id": "1007", "simple": { "limit": 60, "period": 60 } }
+  ],
+  "d1_databases": [
+    {
+      // The same database the site reads rankings and accounts from.
+      "binding": "WG_DB",
+      "database_name": "swanrevival-wondergate",
+      "database_id": "b4ec9b62-5ea7-4610-bea4-0813a73d9946",
+      "migrations_dir": "../../migrations-wondergate"
+    }
+  ]
+}

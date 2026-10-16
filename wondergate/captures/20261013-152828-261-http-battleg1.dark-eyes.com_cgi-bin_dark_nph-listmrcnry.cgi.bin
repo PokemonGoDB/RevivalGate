@@ -1,0 +1,9 @@
+POST /cgi-bin/dark/nph-listmrcnry.cgi HTTP/1.1
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Host: battleg1.dark-eyes.com
+Content-Length: 0
+X-SWAN-MCDL-ID: 00000000
+X-SWAN-MCDL-CLASS: 0
+X-SWAN-MCDL-LVL: 1
+

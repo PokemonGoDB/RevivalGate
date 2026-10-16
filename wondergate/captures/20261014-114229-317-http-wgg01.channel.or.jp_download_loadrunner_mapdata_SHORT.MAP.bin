@@ -1,0 +1,3 @@
+GET //download/loadrunner/mapdata/SHORT.MAP HTTP/1.1
+Host: wgg01.channel.or.jp
+

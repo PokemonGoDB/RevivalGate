@@ -1,0 +1,649 @@
+{
+  "schema": 1,
+  "updated": "2026-10-15",
+  "statuses": {
+    "working": "Rebuilt on our servers and verified headless on the real game code by normal play.",
+    "shortcut-verified": "Rebuilt and working, but verified by setting game state directly (RAM/SRAM pokes or a patched ROM copy) instead of reaching it by normal play.",
+    "substitute": "Works end to end, but serves stand-in content because the original server data was lost.",
+    "partial": "Works, with parts not rebuilt yet (see open items).",
+    "missing": "Not rebuilt yet.",
+    "impossible": "Cannot be rebuilt: the counterpart no longer exists."
+  },
+  "games": [
+    {
+      "id": "mobilewondergate",
+      "title": "MobileWonderGate cart",
+      "doc": "docs/wondergate/mobilewondergate.md",
+      "replays": [
+        "mwgbrowser",
+        "mwgmail",
+        "mwggame"
+      ],
+      "features": [
+        {
+          "name": "Web browser (portal pages)",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "Home page, game list, news, a mail guide, and the game download page."
+        },
+        {
+          "name": "Mail auto-setup",
+          "status": "working",
+          "verified": "in-game"
+        },
+        {
+          "name": "Mail (receive and send)",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "Mail only goes between WonderGate accounts on our server. It never reaches the internet."
+        },
+        {
+          "name": "Game downloads (GAME menu)",
+          "status": "substitute",
+          "verified": "in-game",
+          "notes": "Bandai's downloadable games are lost; the only one on record is a 15 puzzle. We serve our own homebrew Snake instead, and homebrew will be clearly labelled on the portal and in the game."
+        }
+      ],
+      "open": [
+        "Label homebrew clearly: on the portal, on its own page, and on the game's title screen",
+        "More homebrew games",
+        "Ask owners to check their cartridge's save memory (SRAM bank 7) for a game downloaded in 2001–2004"
+      ]
+    },
+    {
+      "id": "rakujang",
+      "title": "Raku Jongg",
+      "doc": "docs/wondergate/raku-jongg.md",
+      "replays": [
+        "rakujang"
+      ],
+      "features": [
+        {
+          "name": "Rankings (ranks, tables, names, stages)",
+          "status": "working",
+          "verified": "in-game"
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "gunpeyex",
+      "title": "GunPey EX",
+      "doc": "docs/wondergate/gunpey-ex.md",
+      "replays": [
+        "gunpeyex"
+      ],
+      "features": [
+        {
+          "name": "National rankings, all 5 modes",
+          "status": "working",
+          "verified": "in-game"
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "tarepang",
+      "title": "Tare Panda no GunPey",
+      "doc": "docs/wondergate/tare-panda.md",
+      "replays": [
+        "tarepang"
+      ],
+      "features": [
+        {
+          "name": "National rankings, all 4 modes",
+          "status": "working",
+          "verified": "in-game"
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "heaven",
+      "title": "Another Heaven",
+      "doc": "docs/wondergate/another-heaven.md",
+      "replays": [
+        "heaven"
+      ],
+      "features": [
+        {
+          "name": "Quick-solve ranking",
+          "status": "working",
+          "verified": "in-game"
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "tanetori",
+      "title": "D's Garage 21: Tane o Maku Tori",
+      "doc": "docs/wondergate/ds-garage.md",
+      "replays": [
+        "tanetori"
+      ],
+      "features": [
+        {
+          "name": "National best on all 4 boards",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "Tested by playing a round of ずーっと 易 and connecting: the score went up and showed as the national best, with your rank."
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "sennou",
+      "title": "Sennou Millennium",
+      "doc": "docs/wondergate/sennou.md",
+      "replays": [
+        "sennou"
+      ],
+      "features": [
+        {
+          "name": "Net ranking",
+          "status": "working",
+          "verified": "in-game"
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "finallap",
+      "title": "Final Lap 2000",
+      "doc": "docs/wondergate/final-lap.md",
+      "replays": [
+        "final-lap"
+      ],
+      "features": [
+        {
+          "name": "W.G ranking: total and lap times on all 16 courses",
+          "status": "working",
+          "verified": "in-game"
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "pocketf",
+      "title": "Pocket Fighter",
+      "doc": "docs/wondergate/pocket-fighter.md",
+      "replays": [
+        "pocketf"
+      ],
+      "features": [
+        {
+          "name": "Customer ID, score upload, rankings",
+          "status": "working",
+          "verified": "in-game"
+        },
+        {
+          "name": "Paid extras and digital cards",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "Everything is unlocked. The prepaid charge is simulated, so nothing is paid."
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "rainbow",
+      "title": "Rainbow Islands: Putty's Party",
+      "doc": "docs/wondergate/rainbow-islands.md",
+      "replays": [
+        "rainbow"
+      ],
+      "features": [
+        {
+          "name": "Item GET, Illust GET",
+          "status": "working",
+          "verified": "in-game"
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "gundam1",
+      "title": "Mobile Suit Gundam Vol. 1: Side 7",
+      "doc": "docs/wondergate/gundam-vol1.md",
+      "replays": [
+        "gundam1"
+      ],
+      "features": [
+        {
+          "name": "Hammer and Javelin unlock",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "The WONDERGATE menu only appears once the game is cleared. It was tested from a save marked as cleared."
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "gundam3",
+      "title": "Mobile Suit Gundam Vol. 3: A Baoa Qu",
+      "doc": "docs/wondergate/gundam-vol3.md",
+      "replays": [
+        "gundam3"
+      ],
+      "features": [
+        {
+          "name": "Sub-scenario unlock (needs only a connection)",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Tested with the game marked as cleared and the console's own memory holding the record the game looks for, rather than by beating the game."
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "buffers",
+      "title": "Buffers Evolution",
+      "doc": "docs/wondergate/buffers-evolution.md",
+      "replays": [
+        "buffers"
+      ],
+      "features": [
+        {
+          "name": "National rank, world record, and the time for the next rank, on all 36 courses",
+          "status": "working",
+          "verified": "in-game"
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "tonpuusou",
+      "title": "Tonpuusou",
+      "doc": "docs/wondergate/tonpuusou.md",
+      "replays": [
+        "tonpuusou"
+      ],
+      "features": [
+        {
+          "name": "Rating (R) download and upload, ID and password",
+          "status": "working",
+          "verified": "in-game"
+        },
+        {
+          "name": "Link results to the PC version",
+          "status": "substitute",
+          "verified": "offline",
+          "notes": "The PC 東風荘 service closed in March 2018. Our server keeps each player's rating, and a leaderboard on this site will stand in for the PC rankings. The PC side could come back later, because copies of the PC client survive."
+        }
+      ],
+      "open": [
+        "A Tonpuusou leaderboard on this site: rating and games played",
+                "Later, maybe: bring back the PC service"
+      ]
+    },
+    {
+      "id": "gashapon",
+      "title": "SD Gundam Gashapon Senki Episode 1",
+      "doc": "docs/wondergate/gashapon-senki.md",
+      "replays": [],
+      "features": [
+        {
+          "name": "Map downloads",
+          "status": "missing",
+          "verified": "none",
+          "notes": "The 12 maps Bandai served are lost, so nothing is served for now. We briefly served the game's own 10 built-in maps as a stand-in and stopped on 14 October 2026."
+        }
+      ],
+      "open": [
+        "Decode the map format (terrain, units, enemy AI), and prove it by rebuilding the 10 built-in maps exactly",
+        "New maps, clearly labelled as fan-made in the game and on this site",
+        "Ask owners to check their cartridge's save memory for downloaded maps (it holds 3)"
+      ]
+    },
+    {
+      "id": "gatherbeat",
+      "title": "SD Gundam G Generation Gather Beat 1 & 2",
+      "doc": "docs/wondergate/gather-beat.md",
+      "replays": [
+        "gatherbeat",
+        "gatherbeat2"
+      ],
+      "features": [
+        {
+          "name": "Gather Beat 2 shop: units, parts, pilots, scenarios",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Serves the list players recorded in 2002, at the recorded prices: 10 units, 4 parts, 3 pilots and the two bonus scenarios. Tested with a faked cleared save: everything can be bought, and a bought scenario becomes the next stage."
+        },
+        {
+          "name": "Gather Beat 1 shop: ☆ units, characters, parts",
+          "status": "substitute",
+          "verified": "injected",
+          "notes": "Serves Bandai's final list (April 2001): 16 units including the ten stronger ☆ suits, 9 characters, 3 parts. Bandai's prices are lost, so the prices are our estimates, based on how Gather Beat 2's shop prices compare with its in-game prices."
+        }
+      ],
+      "open": [
+        "Ask Gather Beat 1 owners to check their saves: the last shop download may still be there with its real prices (save memory, from 0x79C)",
+        "Play a Gather Beat 2 bonus scenario through from a real cleared save"
+      ]
+    },
+    {
+      "id": "doraemon",
+      "title": "Pocket no Naka no Doraemon",
+      "doc": "docs/wondergate/doraemon.md",
+      "replays": [
+        "doraemon"
+      ],
+      "features": [
+        {
+          "name": "DORA MAIL seasonal mails",
+          "status": "working",
+          "verified": "in-game"
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "ring",
+      "title": "Ring Infinity",
+      "doc": "docs/wondergate/ring-terrors.md",
+      "replays": [
+        "ring"
+      ],
+      "features": [
+        {
+          "name": "Event mails (check-in)",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "Connecting delivers a hint mail from the game's cast, often pointing to a side event you haven't found yet. There was never an extra scenario to download: the game has no way to receive one, and the mails were always on the cartridge, waiting for a connection. Back then, these mails were most likely what players remembered as new scenarios, since without them most people would have missed those side events."
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "terrors2",
+      "title": "Terrors 2",
+      "doc": "docs/wondergate/ring-terrors.md",
+      "replays": [
+        "terrors2"
+      ],
+      "features": [
+        {
+          "name": "Real-time campaign clock",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "Confirmed in the 黒い影 story, where the dialogue changes between morning and evening. We haven't seen the other two stories use the clock."
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "wizardry",
+      "title": "Wizardry Scenario 1",
+      "doc": "docs/wondergate/wizardry.md",
+      "replays": [
+        "wizardry",
+        "wizrank"
+      ],
+      "features": [
+        {
+          "name": "Additional maps",
+          "status": "working",
+          "verified": "in-game"
+        },
+        {
+          "name": "Net shopping (stock list)",
+          "status": "working",
+          "verified": "in-game"
+        },
+        {
+          "name": "Ranking registration",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Tested by setting up the end-of-game state directly, not by beating the game."
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "d1tamers",
+      "title": "Digimon Adventure 02: D1 Tamers",
+      "doc": "docs/wondergate/digimon-d1-tamers.md",
+      "replays": [
+        "d1tamers",
+        "d1ranking"
+      ],
+      "features": [
+        {
+          "name": "Signup",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Tested by switching the game straight into its WonderGate session, rather than through its menus."
+        },
+        {
+          "name": "Ranking battles and ladder",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Tested by switching the game straight into its WonderGate session, rather than through its menus."
+        },
+        {
+          "name": "ID upload, search and battle",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Tested by switching the game straight into its WonderGate session, rather than through its menus."
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "darkeyes",
+      "title": "Dark Eyes: Battle Gate",
+      "doc": "docs/wondergate/dark-eyes.md",
+      "replays": [
+        "darkeyes",
+        "demerc"
+      ],
+      "features": [
+        {
+          "name": "Online battles (login, prepaid service, matchmaking, turn relay)",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "A battle between two cartridges was tested by hand. Our automatic test plays one side."
+        },
+        {
+          "name": "Mercenaries (register, list, hire, withdraw, fees)",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Every step was checked in the game, with a test party written into the save."
+        },
+        {
+          "name": "World info (market, world events, busiest and quietest battle regions, place names)",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "The world-event schedule is ours, because the original is lost. Your cartridge reports how many random battles you've fought in each region. As in the original, the quietest region pays a quarter more for random battles, and the region where everyone fights most pays half. Since few people play, the bonus starts after a few dozen battles from anyone, but the halving waits until at least three players have connected in the past month. We're still balancing this, and may change it based on how many people play and where they fight. That effect comes from the game's code."
+        }
+      ],
+      "open": [
+        "Watch random-battle earnings change in the busiest or quietest region"
+      ]
+    },
+    {
+      "id": "starhearts",
+      "title": "Star Hearts",
+      "doc": "docs/wondergate/star-hearts.md",
+      "replays": [
+        "starhearts"
+      ],
+      "features": [
+        {
+          "name": "Gate Bazaar membership",
+          "status": "working",
+          "verified": "in-game"
+        },
+        {
+          "name": "Visitor counters",
+          "status": "shortcut-verified",
+          "verified": "patched-rom",
+          "notes": "The characters who count visitors don't appear in a new save, so this was tested on a modified copy of the game."
+        }
+      ],
+      "open": []
+    },
+    {
+      "id": "wclassic",
+      "title": "Wonder Classic",
+      "doc": "docs/wondergate/wonder-classic.md",
+      "replays": [
+        "wclassic",
+        "wcshot"
+      ],
+      "features": [
+        {
+          "name": "Member card registration",
+          "status": "working",
+          "verified": "in-game"
+        },
+        {
+          "name": "Net Tour (bulletin, round download, play, entry)",
+          "status": "substitute",
+          "verified": "in-game",
+          "notes": "Works from start to finish, but no original round survives, and there's no evidence one was ever held. We serve a test round on built-in course 0, with weather and wind that change every Monday and harder conditions in the final week, as the manual describes. Monthly themed tours are planned."
+        },
+        {
+          "name": "Rankings, your rank, previous winners, past rankings",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "Every entry is a finished round, so the HOLE column always shows F."
+        },
+        {
+          "name": "New product (monthly item)",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "Bandai released a new item every Monday, and each download carried every item so far. Ours gives one item a month."
+        },
+        {
+          "name": "Super shot upload and VTR",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "The test shot was recorded after resetting the stroke counter."
+        },
+        {
+          "name": "耳寄り情報 (inside tips) and the ネオキャラ (Neo characters) unlock",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Reached by marking all 12 characters as cleared in the save."
+        },
+        {
+          "name": "Tour replays",
+          "status": "substitute",
+          "verified": "offline",
+          "notes": "We don't know which replays the original rounds came with. Our round comes with none, which the game accepts. We plan to make replays for each round once the format is decoded."
+        }
+      ],
+      "open": [
+        "A monthly tour as the manual describes: a final for the top 100 after three qualifying weeks (the weekly weather and wind already change)",
+        "A new product every week, adding up as the original did",
+        "Replays for each round we make",
+        "Keep every round and replay we make, and list past tours on this site"
+      ]
+    },
+    {
+      "id": "loderunner",
+      "title": "Lode Runner for WonderSwan",
+      "doc": "docs/wondergate/lode-runner.md",
+      "replays": [
+        "loderunner",
+        "loderunner-link"
+      ],
+      "features": [
+        {
+          "name": "Extra stage downloads (50+)",
+          "status": "missing",
+          "verified": "in-game",
+          "notes": "The download feature is fully worked out and our server answers it as a closed service (the game's own \"no data list\" message). A local test with copies of built-in maps downloaded, played and saved a stage. The 50+ stages Bandai served are lost."
+        },
+        {
+          "name": "Stage sharing over the link cable (our addition)",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "Not a Bandai feature: Bandai never took uploads. The adapter plays the second console of the game's own DATA I/O menu; the player sends MAP1/MAP2 as to a friend, the game shows its normal \"send complete\" message, and the stage goes to our server's review queue (nothing is published automatically; published stages will be credited to the player on the site). Tested in the emulator with a synthetic test pattern; not yet on hardware."
+        }
+      ],
+      "open": [
+        "Decide whether and how to offer new stages, clearly labelled as fan-made (the game shows only a stage number and date, so labels must live on our site)",
+        "Ask owners to dump their cartridge's EEPROM: stages a player saved to MAP1/MAP2 are the only surviving copies",
+        "Link-cable stages: decide how players are credited (the game sends no name) and how a refused upload is reported (the game has already shown success)"
+      ]
+    },
+    {
+      "id": "bravetamer",
+      "title": "Digimon Tamers: Brave Tamer",
+      "doc": "docs/wondergate/brave-tamer.md",
+      "replays": [
+        "bravetamer",
+        "braverank",
+        "bravehall"
+      ],
+      "features": [
+        {
+          "name": "Signup",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Reached from the title menu by normal play, but the save's first Digimon is poked into RAM instead of playing to the first partner."
+        },
+        {
+          "name": "Ranking battles and ladder",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Reached from the title menu by normal play, but the save's first Digimon is poked into RAM instead of playing to the first partner."
+        },
+        {
+          "name": "Hall-of-fame battles (でんどうバトル)",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Bandai's hall of fame is lost; ours enshrines each week's ladder leader. Reached from the title menu by normal play, but the save's first Digimon is poked into RAM instead of playing to the first partner."
+        }
+      ],
+      "open": [
+        "Reach the WonderGate with a real first partner (play or an owner's save) instead of the party poke"
+      ]
+    },
+    {
+      "id": "yamato",
+      "title": "Uchuu Senkan Yamato",
+      "doc": "docs/wondergate/yamato.md",
+      "replays": [
+        "yamato"
+      ],
+      "features": [
+        {
+          "name": "National ranking (Yamato index, top 50)",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "The 通信 menu only appears once the game is cleared. It was tested from a save marked as cleared."
+        },
+        {
+          "name": "Crew logs (all 30, in the ROM)",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "The logs were always on the cartridge; the server's date released them every two weeks in 2001. Today's date opens all 30."
+        }
+      ],
+      "open": [
+        "Check with a CLEAR save from real play and on real hardware"
+      ]
+    },
+    {
+      "id": "gundam2",
+      "title": "Mobile Suit Gundam Vol. 2: Jaburo",
+      "doc": "docs/wondergate/gundam-vol2.md",
+      "replays": [
+        "gundam2"
+      ],
+      "features": [
+        {
+          "name": "Side stories (セイラの回想, カイの回想), needs only a connection",
+          "status": "shortcut-verified",
+          "verified": "injected",
+          "notes": "Both side stories are in the cartridge and play after a connection; the menu was never removed. Tested with the game marked as cleared and the console's own memory holding the record the game's ending writes, rather than by beating the game."
+        }
+      ],
+      "open": []
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+POST http://wgg01.channel.or.jp/service/swan-ranking/sen-know HTTP/1.1
+Host: wgg01.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 74
+
+*=010111&owner=G0G0G0G0G0G0G0G0&score=1|00000000|000&list=ranking|10|%2b16

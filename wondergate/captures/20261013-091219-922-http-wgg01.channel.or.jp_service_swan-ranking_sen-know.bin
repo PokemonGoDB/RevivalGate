@@ -1,0 +1,5 @@
+POST http://wgg01.channel.or.jp/service/swan-ranking/sen-know HTTP/1.1
+Host: wgg01.channel.or.jp
+Content-Length: 52
+
+*=ZZZZZZ&owner=QWXZQWXZQWXZQWXZ&score=1|00123456|001

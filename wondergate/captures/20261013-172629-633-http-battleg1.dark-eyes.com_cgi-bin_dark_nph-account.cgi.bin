@@ -1,0 +1,9 @@
+POST /cgi-bin/dark/nph-account.cgi HTTP/1.1
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Host: battleg1.dark-eyes.com
+Content-Length: 0
+X-SWAN-ACNT-ID: 00000000
+X-SWAN-ACNT-SID: BAN00E0100000000vp34YPXY8VtDRyLNn9LUpZTNX81QfhqEzxeY0SDw8ASIX5hLVT2fccVQ1bisNq3ufUxopA==
+X-SWAN-ACNT-CMD: 1
+

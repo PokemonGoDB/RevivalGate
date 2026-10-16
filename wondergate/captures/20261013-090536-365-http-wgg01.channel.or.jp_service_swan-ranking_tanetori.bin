@@ -1,0 +1,5 @@
+POST http://wgg01.channel.or.jp/service/swan-ranking/tanetori HTTP/1.1
+Host: wgg01.channel.or.jp
+Content-Length: 55
+
+*=ZZZZZZ&owner=QWXZ++++++++++++&score=1|0000123456|0042

@@ -1,0 +1,5 @@
+POST http://rakujang.wgg.channel.or.jp/swan-ranking HTTP/1.1
+Host: rakujang.wgg.channel.or.jp
+Content-Length: 40
+
+*=BBBBBB&owner=0123456&score=2|000100|03

@@ -1,0 +1,7 @@
+POST http://gunpeyex.wgg.channel.or.jp/swan-ranking HTTP/1.1
+Host: gunpeyex.wgg.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 158
+
+*=987F3C&owner=MEDNAFEN++++++++&score=1|0000000000|0000&score=2|0000000000|0000&score=3|00010060&score=4|0000000000|0000&score=5|0000000000|0000&list=RANK|1|3

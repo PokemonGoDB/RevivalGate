@@ -1,0 +1,6 @@
+# MesenCE timing overrides for the game server repo's emu/replays.txt (same format; a line here
+# replaces the line with the same key there). MesenCE sends at the console's real 9600 baud, where
+# the replays were recorded in a core that sends about 12x faster, so a few menus appear later.
+#
+# Gashapon: the downloaded map list appears ~600 frames later; wait before picking OPEN WAR.
+gashapon   | gashapon        | A+B+Y_DOWN+Y_LEFT*300 w600 START w300 START w300 DOWN w20 DOWN w20 DOWN w20 DOWN w20 A w300 A w300 w600 w600 DOWN w30 A w300 A w300 A w300 A w300 LEFT w30 A w600 | [/download/sdgundame/M0001.BIN]

@@ -1,0 +1,5 @@
+POST http://wgg01.channel.or.jp/service/swan-ranking/tarepang HTTP/1.1
+Host: wgg01.channel.or.jp
+Content-Length: 112
+
+*=ZZZZZZ&owner=QWXZ++++++++++++&score=1|0000123400|0042&score=2|0000077700&score=3|0000005000&score=4|0000003300

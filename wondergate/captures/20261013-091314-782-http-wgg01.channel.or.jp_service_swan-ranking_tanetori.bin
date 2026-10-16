@@ -1,0 +1,7 @@
+POST http://wgg01.channel.or.jp/service/swan-ranking/tanetori HTTP/1.1
+Host: wgg01.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 49
+
+*=007F3C&owner=MEDNAFEN++++++++&list=TANETORI|1|1

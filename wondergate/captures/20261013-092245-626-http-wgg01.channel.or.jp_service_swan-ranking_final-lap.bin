@@ -1,0 +1,7 @@
+POST http://wgg01.channel.or.jp/service/swan-ranking/final-lap HTTP/1.1
+Host: wgg01.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 322
+
+*=7F3C985F&owner=AAA&score=1|95999|0|&score=2|95999|0|&score=3|95999|0|&score=4|95999|0|&score=5|95999|0|&score=6|95999|0|&score=7|95999|0|&score=8|95999|0|&score=9|95999|0|&score=10|95999|0|&score=11|95999|0|&score=12|95999|0|&score=13|95999|0|&score=14|95999|0|&score=15|95999|0|&score=16|95999|0|&group=1&list=FLTOP|1|1

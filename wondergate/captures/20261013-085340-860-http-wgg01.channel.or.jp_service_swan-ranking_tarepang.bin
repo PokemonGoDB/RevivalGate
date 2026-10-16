@@ -1,0 +1,7 @@
+POST http://wgg01.channel.or.jp/service/swan-ranking/tarepang HTTP/1.1
+Host: wgg01.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 126
+
+*=987F3C&owner=MEDNAFEN++++++++&score=1|0000000000|0000&score=2|0000000000&score=3|0000010060&score=4|0000000000&list=TARE|1|3

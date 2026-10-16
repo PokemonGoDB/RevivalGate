@@ -1,0 +1,5 @@
+POST http://tongpuso.wgg.channel.or.jp/cgi-bin/getrate.cgi HTTP/1.1
+Host: tongpuso.wgg.channel.or.jp
+Content-Length: 14
+
+c=0000&d=wrong

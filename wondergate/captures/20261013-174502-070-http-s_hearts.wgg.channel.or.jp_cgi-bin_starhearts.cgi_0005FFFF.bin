@@ -1,0 +1,4 @@
+GET /cgi-bin/starhearts.cgi?0005FFFF HTTP/1.1
+Host: s_hearts.wgg.channel.or.jp
+User-Agent: SWAN/1.0
+

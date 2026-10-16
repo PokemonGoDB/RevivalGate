@@ -1,0 +1,7 @@
+POST /setup HTTP/1.0
+Host: start.mopera.ne.jp
+User-Agent: SWAN/1.0
+Content-type: application/x-www-form-urlencoded
+Content-Length: 7
+
+setup=1

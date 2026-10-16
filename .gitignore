@@ -1,0 +1,12 @@
+node_modules/
+.wrangler/
+public/
+wondergate/host/wgcore-host
+wondergate/host/*.dSYM/
+wondergate/logs/
+wondergate/data/
+wondergate/local/
+wondergate/runs/
+wondergate/tools/mdfnkey
+__pycache__/
+.DS_Store

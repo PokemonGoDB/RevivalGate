@@ -1,0 +1,5 @@
+POST http://gunpeyex.wgg.channel.or.jp/swan-ranking HTTP/1.1
+Host: gunpeyex.wgg.channel.or.jp
+Content-Length: 144
+
+*=AAAAAA&owner=ALICE+++++++++++&score=1|0000123400|0042&score=2|0000000000|0000&score=3|00009000&score=4|0000000000|0000&score=5|0000000000|0000

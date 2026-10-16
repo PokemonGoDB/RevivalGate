@@ -1,0 +1,5 @@
+POST http://wgb01.channel.or.jp/service/charge/nph-session HTTP/1.1
+Host: wgb01.channel.or.jp
+User-Agent: SWAN/1.0
+X-swan-cmnd-sid: BAN00A01fzyA0001Uc/l+WyE9Jupkh4uBeWnzMkjELsteV1FyYt0ar239zjpHU2alDJ8v3fhqV5KKCVe50ra+Q==
+
