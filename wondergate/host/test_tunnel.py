@@ -335,7 +335,7 @@ def main(host_bin):
     r2 = con.cmd(frame(0x11, 0x01, b"\x00"))
     t0 = time.time()
     r = con.cmd(connect_frame(r2[4], SERVER_IP, 80))
-    check("no link: connect fails at once", r == frame(0x11, 0x03, b"\x00\x00") and time.time() - t0 < 0.5,
+    check("no link: connect fails at once", r == frame(0x11, 0x03, bytes([r2[4], 0])) and time.time() - t0 < 0.5,
           f"{r} {time.time() - t0:.2f}s")
     con.cmd(frame(0x11, 0x07, bytes([r2[4]])))
     info = phone.accept(5)
@@ -355,7 +355,7 @@ def main(host_bin):
     t0 = time.time()
     r = con.cmd(connect_frame(r2[4], SERVER_IP, 80))
     check("STATUS without the server bit: connect fails at once, no OPEN",
-          r == frame(0x11, 0x03, b"\x00\x00") and time.time() - t0 < 0.5 and phone.recv(0.3) is None, r)
+          r == frame(0x11, 0x03, bytes([r2[4], 0])) and time.time() - t0 < 0.5 and phone.recv(0.3) is None, r)
     con.close()
 
     # ---- no phone at all ----
@@ -368,7 +368,7 @@ def main(host_bin):
     r2 = con.cmd(frame(0x11, 0x01, b"\x00"))
     t0 = time.time()
     r = con.cmd(connect_frame(r2[4], SERVER_IP, 80))
-    check("no phone ever connected: connect fails at once", r == frame(0x11, 0x03, b"\x00\x00") and time.time() - t0 < 0.5, r)
+    check("no phone ever connected: connect fails at once", r == frame(0x11, 0x03, bytes([r2[4], 0])) and time.time() - t0 < 0.5, r)
     con.close()
 
     # ---- MTU 23 ----
@@ -401,12 +401,16 @@ def main(host_bin):
     reply = bytes(range(90))
     phone.send(bytes([P_DATA, tid]) + reply[:18])
     con.send(frame(0x11, 0x0F, bytes([sid, 200])))
+    # Busy-wait, not sleep: under Docker on a Mac, sleep(0.04) often takes 100-250 ms, past the
+    # adapter's 100 ms gather window, and the test would measure the VM's timers instead.
     for i in range(18, 90, 18):
-        time.sleep(0.04)
+        until = time.monotonic() + 0.04
+        while time.monotonic() < until:
+            pass
         phone.send(bytes([P_DATA, tid]) + reply[i:i + 18])
     r = con.reply()
     check("MTU 23: a reply arriving as 5 messages 40 ms apart comes back in one receive",
-          r == frame(0x11, 0x0F, bytes([0, 90]) + reply), r and r.hex(" "))
+          r == frame(0x11, 0x0F, bytes([sid, 90]) + reply), r and r.hex(" "))
     con.close()
 
     print(f"\n{'ALL PASS' if not FAILS else f'{FAILS} FAILED'}")

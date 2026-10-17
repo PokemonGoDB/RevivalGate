@@ -61,7 +61,7 @@ Unknown commands and oversized payloads get **no reply** (games time out).
 | `02:01` | Adapter status | Reply uses cmd `02`: 0 = off, 2 = on, 3 = PPP up |
 | `01:00` | Phone/PDC status | `status, reception(0–15)`. Status: 0 ok, 1 busy, 2 no service, 3 no phone. Some games ask before power-on, so answer "ok" from the start |
 | `01:08` | Dial | Reply uses cmd `0B` |
-| `01:0A` | Hang up | Reply uses cmd `0B` with 4 zero params (Raku Jongg checks length ≥ 8) |
+| `01:0A` | Hang up | Reply cmd `0B` with one byte, `F0` (line down). Wonder Classic checks the length (5 bytes) and the high nibble (`F`), and retries three times otherwise |
 | `01:10` | Set PPP user/pass | `01` = ok |
 | `01:11` | Set DNS servers | `01` = ok |
 | `11:01` | New TCP socket | Socket id, or `FF` |
@@ -89,8 +89,14 @@ WonderGateway we took facts, not code (it has **no license**):
   busy-line reply;
 - its per-game testing: socket ids from 0, phone status "ok" before power-on
   (Buffers Evolution), Rainbow Islands failing on a 1-byte socket-close reply,
-  Raku Jongg needing a 4-byte hang-up reply;
+  Raku Jongg needing a 4-byte hang-up reply (no game turned out to need that: we now send `0B F0`, see the table above);
 - its README's list of working titles (the Keitai Archive column below).
+
+Blind tests (2026-10-16): for each of those facts, an agent got this adapter with that one fact reset to
+wonderfence's behaviour, no comments, no internet and no access to these notes, and had to make every
+game work. Each fact was found again from the games' own code in 18 to 31 minutes (power-off 31, hang-up
+25, socket ids 25, phone status 22, close reply 18); the wake reply turned out to be unnecessary (games fall
+back to a power-on command). The runs also found the hang-up reply Wonder Classic actually needs.
 
 Its Mednafen patch was read to see how Mednafen launches an outside adapter; our
 emulator build (`emu/comm.c`, from the libretro core's own file) doesn't use it.

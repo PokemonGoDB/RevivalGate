@@ -17,8 +17,8 @@ Sennou drives the serial port by interrupt and checks replies strictly (state ma
 - **Wake-up**: power-on first; if that fails it sends `00` ×10 and expects `55` ×5, then power-on
   again expecting a cmd-`02` reply. So the `55` burst answers a `00` burst, not power-on.
 - **`0B` is call-state news**: first byte `00` = connected, nonzero = line down. After hang-up
-  it waits for a nonzero `0B` (we send `0B 01 00 00 00`).
-- **Close socket replies `00 01`** (like connect); it checks for 1.
+  it waits for a nonzero `0B` (we send `0B F0`).
+- **Close socket replies `<sock> 01`** (like connect); it checks for 1.
 - Receive count `FF` or `00` = end of data. It reads to end-of-connection.
 - Errors ≥ 100 display as 099; 499 = request/parse error.
 

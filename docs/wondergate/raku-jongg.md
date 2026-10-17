@@ -34,12 +34,13 @@ rakujang=<k>
 - `<stage>`: shown +1 as 『N面』.
 - `<owner>`: up to 8 chars, the low bytes of the game's 16-bit character codes (the cart EEPROM
   holds the default name あふろざむらい as `33 4E 5F 68 53 5B 34`). Echo it byte-exact. Table, read
-  off 私的記録 with each code poked into the saved names (2026-10-15):
+  off 私的記録 with each code poked into the saved names (2026-10-15; symbols rechecked
+  2026-10-16, each code between known kana):
   `20-29` 0-9 · `2A-2E` ぁぃぅぇぉ · `2F-32` ゃゅょっ · `33-62` あ…も や ゐ ゆ ゑ よ ら…ろ わ を ん ·
   `63-7B` が…ご ざ…ぞ だ…ど ば…ぼ ぱ…ぽ · `7C-84` ァィゥェォャュョッ · `85-CD` katakana, same
-  layout as `33-7B` · `CE-D8` 、。！？ー～→←♪“” · `DA` 『 `DB` 』 `DD` ☆ `DF` ♥. `E0` up and below `20`
-  draw nothing. The game never shows the downloaded table (only your rank), so this came from the
-  local records screen, which uses the same font.
+  layout as `33-7B` · `CE-DC` 、。！？ー～→←♪“”『』☆♥ · `DD` space. Any code below `20` or above
+  `DD` ends the name: the game draws nothing after it. The game never shows the downloaded table
+  (only your rank), so this came from the local records screen, which uses the same font.
 
 ## Client details (HTTP lib at ROM `0xCC00`–`0xD1C2`)
 

@@ -119,7 +119,7 @@ def main(host_bin):
     check("dial answers cmd 0B 00 + 19 zero bytes (connected; Gather Beat needs >= 24)", out[6:], frame(0x01, 0x0B, bytes(20)))
 
     out, _ = run(host_bin, poweron + frame(0x01, 0x0A, b"\x01"))
-    check("hang-up answers cmd 0B 01 00 00 00 (line down)", out[6:], frame(0x01, 0x0B, b"\x01\x00\x00\x00"))
+    check("hang-up answers cmd 0B F0 (line down; Wonder Classic needs exactly this length)", out[6:], frame(0x01, 0x0B, b"\xF0"))
 
     out, _ = run(host_bin, poweron + frame(0x07, 0x42))
     check("unknown type: ignored as noise, no reply", out[6:], b"")

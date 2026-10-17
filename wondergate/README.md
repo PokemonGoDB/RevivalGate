@@ -105,9 +105,10 @@ Frame: `[type][length hi][length lo][cmd][params]`, length counts cmd + params.
 | Power-off | `0F 00 01 FF` | WonderGateway's real-adapter capture (Yuvi) |
 | Phone status before power-on | "ok" | WonderGateway's per-game testing (Buffers Evolution) |
 | Dial | `0B 00` (connected) | trap15 |
-| Hang-up | `0B 01 00 00 00` (line down) | Sennou waits for nonzero `0B`; Raku Jongg needs length ≥ 8 |
-| Close socket | `00 01` | Sennou checks for 1 |
-| Socket ids | from 0 | WonderGateway's tested value (trap15 used 0x30) |
+| Hang-up | `0B F0` (line down) | Wonder Classic needs exactly 5 bytes and `(b & F0) == F0`, else it retries 3 times; `F0` is "connection cut" (error 007) in the games' libraries. Found 2026-10-16 in blind tests; the earlier `0B 01 00 00 00` made Wonder Classic retry |
+| Close socket | `<sock> 01` | Sennou checks for 1; Dark Eyes checks the socket id |
+| Socket ids | from 0 | WonderGateway's tested value (trap15 used 0x30); games accept 0-7 (Another Heaven checks) |
+| Socket replies (connect, send, recv, close, shutdown) | start with the socket id asked about | Tonpuusou and Lode Runner read it, Gather Beat retries on a mismatch, Dark Eyes checks it on close. Shutdown's contents are ignored by every game (any reply works, none stalls them), so it follows the same `<sock> 01` shape. All 37 replays also pass with ids starting at 1 |
 | Recv on closed socket | count `FF` | both; Sennou treats `FF` and `00` as end |
 | Noise before a frame | skipped (only types 01 02 03 0F 11 start a frame) | GunPey EX link-cable `8F` |
 | `SEND`+NUL between frames | link peer (our addition): answer `RECV`, `OK`, take Lode Runner's 512-byte stage, upload it | Lode Runner ROM (docs/wondergate/lode-runner.md) |

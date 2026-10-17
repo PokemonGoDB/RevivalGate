@@ -12,7 +12,7 @@ RevivalGate builds on other people's work. This is what I used, and from whom:
      - socket numbers start at 0 (trap15's wonderfence used 0x30);
      - Buffers Evolution expects the phone status to read "ok" before power-on;
      - Rainbow Islands fails on a 1-byte socket-close reply, so mine is 2 bytes (`00 01`);
-     - Raku Jongg needs a 4-byte hang-up reply, so mine is `0B 01 00 00 00`.
+     - Raku Jongg needs a 4-byte hang-up reply. Mine was `0B 01 00 00 00` until later testing showed no game checks that length; it's now `0B F0`, the reply Wonder Classic needs.
   3. **Its list of which games work**, which my notes show as a "Keitai Archive" status column next to the game list.
 
   WonderGateway has no license, so none of its code is used here, only the facts above. I also read its Mednafen patch to see how Mednafen talks to an outside adapter; my emulator build doesn't use it.
