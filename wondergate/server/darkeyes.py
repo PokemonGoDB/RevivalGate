@@ -31,6 +31,7 @@ import datetime
 import json
 import pathlib
 import random
+import secrets
 import struct
 import threading
 import time
@@ -70,6 +71,21 @@ def sjis(text):
 # Who is on each connection: worldinfo (sent before an upload in every session)
 # carries the player's ID and hero name; uploads don't. Keyed by client address.
 SESSIONS = {}
+
+
+BLANK_ID = "00000000"
+
+
+def customer_id():
+    """A new お客様ＩＤ for a cartridge that logs in with the blank one. The login reply's
+    SRVC-ID is copied up to the LF into SRAM 0x6067 (5900:212D..2158; the next field, the
+    mercenary's MID, starts at 0x6070, so 8 characters is all there is room for), saved, and
+    sent as every later request's ID. Bandai's format is lost; ours is
+    8 random hex digits, so one player can't guess another's."""
+    while True:
+        new = secrets.token_hex(4).upper()
+        if new != BLANK_ID:
+            return new
 
 
 def owner_of(h):
@@ -256,6 +272,13 @@ def worldinfo(h, body):
     SESSIONS[h.get("x-wg-peer", "")] = owner
     mid = h.get("x-swan-winf-mid", "")[:8]
     gone = []
+    # Before 2026-11-25 no IDs were issued, so every cart was 00000000 and a mercenary's owner was
+    # "00000000/<hero>". A cart that has its ID now keeps the mercenary it still holds.
+    legacy = BLANK_ID + "/" + h.get("x-swan-winf-name", "")
+    if owner != legacy and db["mercs"].get(mid, {}).get("owner_key") == legacy:
+        db["mercs"][mid]["owner_key"] = owner
+        db["mercs"][mid]["owner"] = h.get("x-swan-winf-id", "")
+        note.append(f"{mid} now owned by {h.get('x-swan-winf-id', '')}")
     if "x-swan-winf-mid" in h:
         # 00000000 = the player withdrew their mercenary (解除, offline); a real
         # MID is their current one, so any other of theirs is stale.
@@ -333,6 +356,16 @@ def match(h, body):
     with LOCK:
         m = MATCHES.get(me)
         opp = MATCHES.get(m["opp"]) if m else None
+        if cmd == "4":
+            # The battle is over on this cart (5900:3A60, sent from the end-of-battle controller
+            # and repeated every POLINT until the answer is 6; 9 is an error). The other side may
+            # still be collecting the last turn, so the battle is dropped once both have said so.
+            if m:
+                m["ended"] = True
+                if not opp or opp.get("ended"):
+                    MATCHES.pop(m["opp"], None)
+                    MATCHES.pop(me, None)
+            return {"X-SWAN-MTCH-RETCD": "6", **poll}, b"", f"match {me} cmd 4: battle over"
         if not m or not opp:
             return {"X-SWAN-MTCH-RETCD": "9"}, b"", f"match {me} cmd {cmd}: no match"
         if cmd == "0":
@@ -377,6 +410,8 @@ def handle(path, headers, body):
         h = {f"X-SWAN-{group}-RETCD": "0"}
         if name == "nph-login.cgi":
             h["X-SWAN-SRVC-TIME"] = time.strftime("%Y%m%d%H%M%S")
+            if headers.get("x-swan-srvc-id", BLANK_ID) == BLANK_ID:
+                h["X-SWAN-SRVC-ID"] = customer_id()
         note = f"{name} {got}"
     name_txt = urllib.parse.unquote(got.get("mtch-name", ""), encoding="cp932", errors="replace")
     return 200, None, data, f"darkeyes {note} {name_txt}".strip(), h, "lf"

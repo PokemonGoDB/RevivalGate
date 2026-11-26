@@ -31,9 +31,16 @@ paths don't use them.
   `0x40F2` and the sets copied to `0x40F4`. Sets index the 20 encounter tables at ROM `0x1EF50D`.
   We enable all ten with the harder sets 10–19.
 - `^SHP`: item numbers 2–121, marked in the shop table (SRAM `0x42A7`). We rotate 12 a month.
-- `^RNK`: four entries `rank name_score` (top 3, then the player). The name is copied up to `_`,
-  the score is 32-bit. Kept in `data/wizardry.json`. Verified in-game: the cartridge shows
-  RANK / NAME / SCORE with the player's row starred (`* 1ST ALICE 1234567 *`).
+- `^RNK`: entries `rank name_score`: the top 3, then the player, and when the player's rank is 5 or
+  more a fifth entry, the place just above the player (parser `0x176AB0`: it reads the fifth into
+  the slot before the player's). Without the fifth the player's row never appears. Kept in
+  `data/wizardry.json`. Verified in-game: the cartridge shows RANK / NAME / SCORE with the player's
+  row starred (`* 1ST ALICE 1234567 *`), and from 5th place down the top 3, `⋮`, the place above and
+  the player (`5TH EEE 8996000`, `* 6TH ALICE 1234567 *`).
+  - Each slot is 6 name bytes, the 32-bit score, then the rank as one byte. The name is copied up
+    to `_` with no length check and the score lands on the sixth byte, so we send at most 5
+    letters (a 6-letter name runs on into the score's bytes on screen, and two of them hung the
+    ranking screen) and at most rank 255.
 - `^MSG` (a message) and `^ERR` (error 601) may also appear.
 
 ## Ranking registration (end of the game)

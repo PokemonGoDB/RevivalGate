@@ -22,6 +22,8 @@ docs/wondergate/digimon-d1-tamers.md and docs/wondergate/brave-tamer.md):
     rankdl   ID[8]                     -> count profile[8]   (ranking, 0xD0 bytes)
     idupld   block                     -> 0 (1 = handle taken)
     idsrch   ID[8] key[8]              -> count profile[8]   (0 = not found)
+             a blank key (FD x 8) asks for a list: D1 Tamers' IDバトル (uploaded parties),
+             Brave Tamer's でんどうバトル (the hall of fame)
     idbtl    ID[8] target-ID[8] word   -> 0 header profile party 0 0  (1 = not found)
 
 The battle itself is simulated by the cartridge from the two parties, so the
@@ -216,6 +218,12 @@ def handle(path, body):
             hall = hall_of_fame(db)
             save(game, db)
             return reply(listing(db, hall) if hall else b"\x00", f"{tag} idsrch hall of fame: {len(hall)}")
+        if key == "fd" * 8:
+            # D1 Tamers' IDバトル searches with a blank key too (E000:381C) and lists what comes
+            # back as opponents to pick from. What Bandai listed is lost; ours is the newest
+            # tamers who have uploaded a party (IDアップロード or a ranking battle), not the caller.
+            found = [k for k in reversed(list(players)) if players[k].get("block") and k != pid][:8]
+            return reply(listing(db, found) if found else b"\x00", f"{tag} idsrch open list: {len(found)}")
         hits = [k for k, p in players.items() if p.get("block") and (k == key or p["name"] == key)]
         return reply(listing(db, hits) if hits else b"\x00", f"{tag} idsrch {key}: {len(hits)} found")
     if name == "idbtl.cgi" and len(body) >= 16:

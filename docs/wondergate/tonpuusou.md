@@ -89,10 +89,8 @@ So the cartridge carries the PC formula, and the server only stores what the car
 - Its results updated the **same R** as the PC service ("その成績がＰＣと同期",
   [mail magazine #3](https://web.archive.org/web/2001/http://arwn.co.jp/tonpuu/mail3.html);
   "ウィンドウズ版と完全にリンク", [Bandai/ARWN](https://web.archive.org/web/2001/http://arwn.co.jp/tonpuu/wondergate.html)).
-- Connecting also entered you in a **全国ヤクマンランキング**; the cart has a 役満トータル回数
-  screen. The upload carries no yakuman data, though: `setrate` sends only the ID, password, R,
-  games and `g=`, and the cart has no other request. So that ranking can't have been fed from
-  this connection.
+- Connecting also entered you in a **全国ヤクマンランキング**. That is its own request, not part of
+  the rate exchange (see "Yakuman ranking" below).
 - At the August 2001 Bandai Cup, 2 final seats went to WonderSwan players who had connected.
 
 **What survives.**
@@ -115,6 +113,48 @@ So the cartridge carries the PC formula, and the server only stores what the car
     redistribute them) and point them at our server.
   - PC and WonderSwan players would then share one R again.
 
-The ROM also has `/swan-ranking` strings (`*=`, `&owner=`, `&list=BEST3|1|3`, `MYRANK=`, and a
-sample `*=00003D&owner=mic&group=1&list=RANK|1|100`), but no code uses them: a leftover from
-the shared Bandai library.
+## Yakuman ranking (全国ヤクマンランキング)
+
+Mode select → オプション → あなたの成績 → 役満ランキング → サービスメニュー:
+やくまんランキングにとうろく・えつらん (register and view), やくまんかいすうをみる (your own counts,
+offline) and でんわばんごうのせってい. The first asks you to accept the service terms (どういする),
+shows the phone number screen (保存 → はい), connects, and then shows the downloaded tables:
+UP/DOWN steps through the yakuman kinds (天和, 地和, 字一色, …), three rows each, `------` for an
+empty place. Until 2026-11-25 these notes said no code used the ROM's `/swan-ranking` strings and
+the server answered 404.
+
+Request (builder ROM `0x4EA13`), in Bandai's swan-ranking style:
+
+```
+POST http://tongpuso.wgg.channel.or.jp/swan-ranking
+*=<serial, 6 hex>&owner=<16 bytes>[&score=<n>%7C<count>%7C]...&list=BEST3%7C1%7C3
+```
+
+- `owner` is the player's name, 16 bytes, each sent + `0x41` (a new cart sends
+  `A=@B@>@>@>@>@>@>`). It can hold any byte, so we take the 16 bytes after `&owner=` as they
+  are and echo them.
+- One `score` per yakuman kind `n` = 1–15 the player has made (the counters are 15 words the
+  builder reads at `0x6C4`); kinds with no yakuman are left out. `|` is sent as `%7C`.
+
+Reply (parser `0xA1D4D`), read one line at a time (at most 127 bytes with its CRLF) until
+Content-Length is used up:
+
+```
+course=<g>|<nn>|…        picks a table and clears it: g = 2 → table 0 (the total);
+                          otherwise nn, exactly two digits at this column → table nn
+ BEST3=<k>               k rows follow: one digit, never 0 (the row loop would run 65,536 times)
+ <r>|<count>|<owner>|    r = 1–3, count up to 5 digits, owner up to 16 bytes, ending in `|`
+```
+
+The `BEST3=` line and the rows **start with a space**; `course=` does not. Tables with no line stay
+empty. A reply with no line at all is エラーコード 599 (そのたのエラーです), so the total's `course=`
+line is always sent.
+
+Our server (`tonpuusou.py` `yakuman`, data in `data/tonpuusou-yakuman.json`; the Worker keeps it
+in its `tonpuusou-yakuman` state) keeps each player's counts (by serial and name; a count only
+goes up), and sends the top three of each kind and of the total. Checked in the game (2026-11-25):
+the cart's request is as above; with four players seeded on the server it showed 天和 7回 / 2回 /
+1回, 地和 1回 and 字一色 1回 in the right places. Not checked: an upload with `score=` fields from a
+cart that has made a yakuman (the test cart had none), and where the game shows table 0.
+
+Regression: `tonyakuman` in `emu/replays.txt`.

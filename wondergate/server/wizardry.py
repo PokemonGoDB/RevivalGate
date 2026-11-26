@@ -10,7 +10,11 @@ Reply body (parsers at ROM 0x176A0B..0x176D13, buffer SRAM 0x5800):
     follow it immediately:
       ^MAP f v f v ...     10 pairs: enabled flag, encounter set (< 20) per extra floor
       ^SHP n n ...         item numbers 2..121 to stock
-      ^RNK r name_score r name_score r name_score r name_score
+      ^RNK r name_score r name_score r name_score r name_score [r name_score]
+                           top 3, then the player; when the player's rank is 5 or more, one more
+                           entry follows: the place just above the player (parser 0x176AB0: slots of
+                           6 name bytes + 32-bit score + rank byte at SRAM 0x411B; the fifth read goes
+                           to the slot before the player's)
     A list ends at the next '#'. ^MSG text and ^ERR (error 601) may appear anywhere.
 Numbers are decimal; the reader skips exactly one character after each number.
 
@@ -26,6 +30,8 @@ import urllib.parse
 DB = pathlib.Path(__file__).resolve().parent.parent / "data" / "wizardry.json"
 ITEMS = range(2, 122)
 PER_MONTH = 12
+NAME_MAX = 5
+RANK_MAX = 255
 
 
 def wrap(section):
@@ -57,8 +63,21 @@ def ranking(name, score):
     while len(top) < 3:
         top.append((len(top) + 1, "", 0))
     mine = next(((i + 1, n, s) for i, (n, s) in enumerate(table) if n == name), (0, name, score))
-    body = "".join(f"{r} {n}_{s} " for r, n, s in top + [mine])
-    return ("^RNK" + body).encode("latin-1", "replace"), mine[0]
+    rows = top + [mine]
+    if mine[0] >= 5:
+        # The cartridge reads a fifth entry here: the place just above the player. Its rank is one
+        # byte, so past 255 the player reads 255 and the place above 254.
+        shown = min(mine[0], RANK_MAX)
+        rows = top + [(shown, *mine[1:]), (shown - 1, *table[mine[0] - 2])]
+    return ("^RNK" + "".join(entry(*row) for row in rows)).encode("latin-1", "replace"), mine[0]
+
+
+def entry(rank, name, score):
+    """One "rank name_score " entry, kept inside the cartridge's slot: the name is copied up to
+    '_' with no length check into 6 bytes, and the score then lands on the sixth. So 5 letters
+    is the most that shows cleanly: a 6-letter name runs on into the score's bytes on screen,
+    and two of them hung the ranking screen (tested in the game)."""
+    return f"{rank} {name[:NAME_MAX].replace('_', ' ')}_{min(score, 0xFFFFFFFF)} "
 
 
 def handle(path, query, body):

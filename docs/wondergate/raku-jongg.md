@@ -28,8 +28,15 @@ rakujang=<k>
 ```
 
 - Only `<your rank>` is read from the course line ("N位です。おめでとう").
-- `<k>`, rank and `<stage>` are 1–2 digits ending in CR. At least one row is
+- `<k>`, `<your rank>` and `<stage>` are 1–2 characters ending in CR. At least one row is
   always parsed, even when `<k>` = 0.
+- **`<your rank>` and `<k>` must be one character.** Their two-digit reads (`0xBF248`, `0xBF359`)
+  do `mov ax,10 / mul bx / add ax,dx`, and `MUL` clears DX, where the units digit was: "15" reads
+  as 10. A lone character is read as char − `'0'` whatever it is, so we send `'0' + n`
+  (10 = `:`, 15 = `?`, 20 = `D`). The game announces ranks 1–20 only, so a lower rank goes as 21
+  (`E`). Only `<stage>` (`0xBF566`, `add ax,bx`) reads two digits correctly. Checked in the game
+  (2026-11-25) with 14 better scores on the server: "ストーリー戦は 15位です。おめでとう", and
+  公的記録 lists all 16 rows; with decimal "15" and "16" it would say 10位 and stop at row 10.
 - `<score>`: up to 6 digits; shown ×100 (`240450` → 24045000点).
 - `<stage>`: shown +1 as 『N面』.
 - `<owner>`: up to 8 chars, the low bytes of the game's 16-bit character codes (the cart EEPROM
@@ -39,8 +46,9 @@ rakujang=<k>
   `20-29` 0-9 · `2A-2E` ぁぃぅぇぉ · `2F-32` ゃゅょっ · `33-62` あ…も や ゐ ゆ ゑ よ ら…ろ わ を ん ·
   `63-7B` が…ご ざ…ぞ だ…ど ば…ぼ ぱ…ぽ · `7C-84` ァィゥェォャュョッ · `85-CD` katakana, same
   layout as `33-7B` · `CE-DC` 、。！？ー～→←♪“”『』☆♥ · `DD` space. Any code below `20` or above
-  `DD` ends the name: the game draws nothing after it. The game never shows the downloaded table
-  (only your rank), so this came from the local records screen, which uses the same font.
+  `DD` ends the name: the game draws nothing after it. This came from the local records screen
+  (私的記録); the downloaded tables are shown with the same font under 記録 → 公的記録 (20 slots
+  per mode, your own row underlined).
 
 ## Client details (HTTP lib at ROM `0xCC00`–`0xD1C2`)
 

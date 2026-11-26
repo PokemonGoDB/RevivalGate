@@ -42,7 +42,7 @@ Data units:
 | `dm4rankbtl` | block | `00` stage seed profile party(117) my-rank opp-rank; `01` = another tamer is battling; `02` = you are #1 ("デジモンはコウシンされました") |
 | `dm4rankdl` | ID[8] | count, 8 profiles (0xD0 bytes) → SRAM `0x48B8` |
 | `dm4idupld` | block | `00`; `01` = handle taken |
-| `dm4idsrch` | ID[8] handle[8] | count, 8 profiles → `0x47B4` (count 0 = not found) |
+| `dm4idsrch` | ID[8] key[8] | count, 8 profiles → `0x47B4` (count 0 = not found). IDサーチ sends the handle typed in; IDバトル (command 3) sends a blank key, `FD`×8 (E000:381C), and lists what comes back as opponents |
 | `dm4idbtl` | ID[8] target-ID[8] word | as rankbtl with result `00`; non-zero = not found |
 
 A ranking battle sends login, then rankbtl, then rankdl, all **before** the battle. The
@@ -57,9 +57,14 @@ reads "ランクがい" (unranked) on the VS screen.
   decided in the cartridge, the server ranks by party strength (HP + D + 4 × (attack + P + speed)):
   the stronger party takes the higher place. The animation can occasionally disagree.
 - ID upload stores the party for ID battles; ID search matches a handle or an ID.
+- IDバトル's blank-key search gets the newest eight tamers who have uploaded a party (IDアップロード or
+  a ranking battle), without the caller. What Bandai listed there is lost; this is our choice.
+  Until 2026-11-25 the blank key was answered "not found", so IDバトル always said
+  データがみつかりません. Checked in the game with three uploaded tamers: the ID BATTLE list shows
+  them, picking one sends `dm4idbtl`, and the VS screen and battle follow.
 - The news message is game-encoded text: hiragana from `0x0A`, katakana from `0x5A`
   (gojūon, voiced after), small kana `0x56–0x59`/`0xA2–0xA9`, ー `0xAB`, space `0xFD`,
   newline `0xFE`, ！ `0xAC`, ？ `0xAD`, 、 `0xB0`, 。 `0xB1`, D `0xB7`, - `0xEB`.
 
-Regression: `d1tamers` (signup) and `d1ranking` (login + ranking download) in
-`emu/replays.txt`.
+Regression: `d1tamers` (signup), `d1ranking` (login + ranking download) and `d1idbattle`
+(login + the blank-key search) in `emu/replays.txt`.

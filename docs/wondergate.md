@@ -133,7 +133,7 @@ server is needed for basic browsing.
 | Mobile Suit Gundam Vol. 1: Side 7 | ✅* shortcut-verified | ✅* Hammer and Javelin unlock | [gundam-vol1.md](wondergate/gundam-vol1.md) |
 | Mobile Suit Gundam Vol. 3: A Baoa Qu | ✅* shortcut-verified | ✅* Sub-scenario unlock (needs only a connection) | [gundam-vol3.md](wondergate/gundam-vol3.md) |
 | Buffers Evolution | ✅ working | ✅ National rank, world record, and the time for the next rank, on all 36 courses | [buffers-evolution.md](wondergate/buffers-evolution.md) |
-| Tonpuusou | 🔁 substitute | ✅ Rating (R) download and upload, ID and password; 🔁 Link results to the PC version | [tonpuusou.md](wondergate/tonpuusou.md) |
+| Tonpuusou | 🔁 substitute | ✅ Rating (R) download and upload, ID and password; ✅ National yakuman ranking (register and view); 🔁 Link results to the PC version | [tonpuusou.md](wondergate/tonpuusou.md) |
 | SD Gundam Gashapon Senki Episode 1 | ❌ missing | ❌ Map downloads | [gashapon-senki.md](wondergate/gashapon-senki.md) |
 | SD Gundam G Generation Gather Beat 1 & 2 | 🔁 substitute | ✅* Gather Beat 2 shop: units, parts, pilots, scenarios; 🔁 Gather Beat 1 shop: ☆ units, characters, parts | [gather-beat.md](wondergate/gather-beat.md) |
 | Pocket no Naka no Doraemon | ✅ working | ✅ DORA MAIL seasonal mails | [doraemon.md](wondergate/doraemon.md) |

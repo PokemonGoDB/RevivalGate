@@ -42,8 +42,16 @@ const MAX_MATCHES = 100; // players in battles: 50 battles, at most about 450 KB
 const MAX_FIELD: Record<string, number> = { id: 16, name: 64, lvl: 8, pass: 32 };
 
 interface Info { id: string; name: string; lvl: string; pass: string; seen: number }
-interface Match { opp: string; info: Info; seed: number; side: number; inbox: string[]; turns: string[]; announced?: boolean; seen?: number }
+interface Match { opp: string; info: Info; seed: number; side: number; inbox: string[]; turns: string[]; announced?: boolean; ended?: boolean; seen?: number }
 interface State { waiting: Record<string, Info>; matches: Record<string, Match> }
+
+const BLANK_ID = '00000000';
+function customerId(): string {
+  for (;;) {
+    const id = hex(crypto.getRandomValues(new Uint8Array(4))).toUpperCase();
+    if (id !== BLANK_ID) return id;
+  }
+}
 
 const keyOf = (h: Record<string, string>) => JSON.stringify([h['x-swan-mtch-id'] ?? '', h['x-swan-mtch-name'] ?? '']);
 const poll = () => ({ 'X-SWAN-MTCH-POLINT': String(POLL), 'X-SWAN-MTCH-TIMEOUT': String(TIMEOUT) });
@@ -109,6 +117,19 @@ function match(state: State, h: Record<string, string>, body: string): [Record<s
   const cmd = h['x-swan-mtch-cmd'] ?? '';
   const m = state.matches[me];
   const opp = m ? state.matches[m.opp] : undefined;
+  if (cmd === '4') {
+    // The battle is over on this cart (5900:3A60, sent from the end-of-battle controller and repeated every
+    // POLINT until the answer is 6; 9 is an error). The other side may still be collecting the last turn, so
+    // the battle is dropped once both have said so.
+    if (m) {
+      m.ended = true;
+      if (!opp || opp.ended) {
+        delete state.matches[m.opp];
+        delete state.matches[me];
+      }
+    }
+    return [{ 'X-SWAN-MTCH-RETCD': '6', ...poll() }, '', `match ${me} cmd 4: battle over`];
+  }
   if (!m || !opp) return [{ 'X-SWAN-MTCH-RETCD': '9' }, '', `match ${me} cmd ${cmd}: no match`];
   m.seen = Date.now() / 1000;
   if (
@@ -432,6 +453,14 @@ function worldinfo(w: World, h: Record<string, string>, body: Uint8Array, peer: 
   }
   const mid = (h['x-swan-winf-mid'] ?? '').slice(0, 8);
   let gone: string[] = [];
+  // Before 2026-11-25 no IDs were issued, so every cart was 00000000 and a mercenary's owner was
+  // "00000000/<hero>". A cart that has its ID now keeps the mercenary it still holds.
+  const legacy = `${BLANK_ID}/${h['x-swan-winf-name'] ?? ''}`;
+  if (owner && owner !== legacy && Object.hasOwn(w.mercs, mid) && w.mercs[mid].owner_key === legacy) {
+    w.mercs[mid].owner_key = owner;
+    w.mercs[mid].owner = h['x-swan-winf-id'] ?? '';
+    note.push(`${mid} now owned by ${h['x-swan-winf-id'] ?? ''}`);
+  }
   if (owner && 'x-swan-winf-mid' in h) {
     // 00000000 = the player withdrew their mercenary (解除, offline); a real MID is their current
     // one, so any other of theirs is stale.
@@ -501,6 +530,10 @@ export async function handle(conn: Conn, path: string, headers: Record<string, s
     if (name === 'nph-login.cgi') {
       const t = jst();
       h['X-SWAN-SRVC-TIME'] = `${t.Y}${t.m}${t.d}${t.H}${t.M}${t.S}`;
+      // A cartridge that logs in with the blank ID gets its お客様ＩＤ: the login reply's SRVC-ID is copied up to
+      // the LF into SRAM 0x6067 (5900:212D..2158; 8 characters is all there is room for), saved, and sent as
+      // every later request's ID. Bandai's format is lost; ours is 8 random hex digits.
+      if ((headers['x-swan-srvc-id'] ?? BLANK_ID) === BLANK_ID) h['X-SWAN-SRVC-ID'] = customerId();
     }
     note = name;
   }

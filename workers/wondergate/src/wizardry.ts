@@ -37,6 +37,16 @@ const KEEP = 1000;
 // usual but not stored, as is a score from an address that's writing too often.
 const MAX_NAME = 16;
 
+/** One "rank name_score " entry, kept inside the cartridge's slot (parser at ROM 0x176AB0): the name is copied up
+ *  to '_' with no length check into 6 bytes, and the score then lands on the sixth, so 5 letters is the most that
+ *  shows cleanly (a 6-letter name runs on into the score's bytes; two of them hung the ranking screen). The score
+ *  is 32-bit, the rank one byte. */
+const NAME_MAX = 5;
+const RANK_MAX = 255;
+function entry(rank: number, name: string, score: number): string {
+  return `${rank} ${name.slice(0, NAME_MAX).replace(/_/g, ' ')}_${Math.min(score, 0xffffffff)} `;
+}
+
 async function ranking(conn: Conn, name: string, score: number): Promise<[string, number]> {
   const store = name.length <= MAX_NAME && !isOffensive(name) && (await writeAllowed(conn));
   return withState<Scores, [string, number]>(conn, 'wizardry', () => [], (scores) => {
@@ -59,8 +69,15 @@ async function ranking(conn: Conn, name: string, score: number): Promise<[string
     while (top.length < 3) top.push([top.length + 1, '', 0]);
     const at = table.findIndex((e) => e.n === name);
     const mine: [number, string, number] = at >= 0 ? [at + 1, table[at].n, table[at].s] : [0, name, score];
-    const body = [...top, mine].map(([r, n, s]) => `${r} ${n}_${s} `).join('');
-    return [`^RNK${body}`, mine[0]];
+    let rows = [...top, mine];
+    // The cartridge reads a fifth entry when the player's rank is 5 or more: the place just above the player.
+    // Its rank is one byte, so past 255 the player reads 255 and the place above 254.
+    if (mine[0] >= 5) {
+      const shown = Math.min(mine[0], RANK_MAX);
+      const above = table[mine[0] - 2];
+      rows = [...top, [shown, mine[1], mine[2]], [shown - 1, above.n, above.s]];
+    }
+    return [`^RNK${rows.map(([r, n, s]) => entry(r, n, s)).join('')}`, mine[0]];
   });
 }
 

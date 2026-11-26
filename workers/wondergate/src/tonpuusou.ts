@@ -5,11 +5,16 @@
 // changes nothing and an out-of-order one never moves the count backwards.
 // Reply lines: c=1 (OK; anything else = authentication failed), e=<rate>, f=<games>.
 // An unknown ID is registered on first use with its password; new players start at R1500.00.
+//
+// The 全国ヤクマンランキング is a separate request in Bandai's swan-ranking style (builder ROM 0x4EA13, reply
+// parser 0xA1D4D); tonpuusou.py has the format:
+//   POST /swan-ranking   *=<serial>&owner=<16 bytes>[&score=<n>%7C<count>%7C]...&list=BEST3%7C1%7C3
 import { isOffensive } from '../../../src/lib/wordfilter';
-import { jst, latin1, strip } from './bytes';
+import { bytesOf, hex, jst, latin1, strip, unhex } from './bytes';
 import type { Conn } from './env';
 import type { Reply } from './http';
 import { quota, writeAllowed } from './limits';
+import { withState } from './state';
 
 const START_RATE = 150000;
 const MAX_ID = 16;
@@ -31,7 +36,73 @@ function reply(ok: number, p: Player | null, note: string): Reply {
   return { status: 200, type: 'text/plain', body, note };
 }
 
+const KINDS = 15; // yakuman kinds the cart counts and uploads
+// The ranking is one D1 row (state.ts): about 130 bytes a player, so this many stay well under its limit. Past
+// it, the player with the fewest yakuman goes.
+const MAX_YAKUMAN_PLAYERS = 3000;
+interface Yakuman { players: Record<string, { owner: string; counts: number[]; updated?: string }> }
+
+/** The national yakuman ranking: keep this player's counts, send back the top 3 of each kind and of the total. */
+async function yakuman(conn: Conn, raw: Uint8Array): Promise<Reply> {
+  const body = latin1(raw);
+  const serial = /^\*=([0-9A-Za-z]{1,8})/.exec(body);
+  const at = body.indexOf('&owner=');
+  const owner = at >= 0 ? body.slice(at + 7, at + 23) : '';
+  const scores = new Map<number, number>();
+  for (const m of body.slice(at + 23).matchAll(/&score=(\d{1,2})%7[Cc](\d{1,5})%7[Cc]/g)) scores.set(Number(m[1]), Number(m[2]));
+  for (const [n, c] of scores) {
+    if (n < 1 || n > KINDS || !c) scores.delete(n);
+    else scores.set(n, Math.min(c, 0xffff));
+  }
+  // The owner goes back to every player inside a '|'-separated line: one that would break the line isn't kept.
+  const sound = owner.length === 16 && ![...owner].some((ch) => ch.charCodeAt(0) < 0x20 || ch === '|');
+  const store = !!serial && sound && scores.size > 0 && (await writeAllowed(conn));
+  return withState<Yakuman, Reply>(conn, 'tonpuusou-yakuman', () => ({ players: {} }), (db) => {
+    let note = 'no yakuman yet';
+    if (store) {
+      const key = `${serial![1].toUpperCase()}:${hex(bytesOf(owner))}`;
+      const p = (db.players[key] ??= { owner: hex(bytesOf(owner)), counts: Array(KINDS).fill(0) });
+      for (const [n, c] of scores) p.counts[n - 1] = Math.max(p.counts[n - 1], c); // the cart's counts only grow
+      const t = jst();
+      p.updated = `${t.Y}-${t.m}-${t.d} ${t.H}:${t.M}:${t.S}`;
+      note = `${p.counts.reduce((a, b) => a + b, 0)} yakuman of ${p.counts.filter(Boolean).length} kinds`;
+      const keys = Object.keys(db.players);
+      if (keys.length > MAX_YAKUMAN_PLAYERS) {
+        const total = (k: string) => db.players[k].counts.reduce((a, b) => a + b, 0);
+        delete db.players[keys.reduce((low, k) => (total(k) < total(low) ? k : low))];
+      }
+    }
+    const players = Object.values(db.players);
+    const out: Uint8Array[] = [];
+    const line = (text: string, name?: string) => out.push(bytesOf(text), ...(name === undefined ? [] : [unhex(name), bytesOf('|')]), bytesOf('\r\n'));
+    let lines = 0;
+    for (let table = 0; table <= KINDS; table++) {
+      const count = (p: { counts: number[] }) => (table === 0 ? p.counts.reduce((a, b) => a + b, 0) : p.counts[table - 1]);
+      const ranked = players.filter((p) => count(p));
+      const top = [...ranked].sort((a, b) => count(b) - count(a)).slice(0, 3);
+      // The total's course line always goes, rows or not: an empty reply is error 599.
+      if (!top.length && table) continue;
+      const five = (n: number) => String(n).padStart(5, '0');
+      line(`${table === 0 ? 'course=2|01' : `course=1|${String(table).padStart(2, '0')}`}|${ranked.length}|${five(top.length ? count(top[0]) : 0)}`);
+      lines++;
+      if (!top.length) continue;
+      line(` BEST3=${top.length}`);
+      top.forEach((p, r) => line(` ${r + 1}|${five(Math.min(count(p), 0xffff))}|`, p.owner));
+      lines += 1 + top.length;
+    }
+    const size = out.reduce((n, b) => n + b.length, 0);
+    const data = new Uint8Array(size);
+    let o = 0;
+    for (const b of out) {
+      data.set(b, o);
+      o += b.length;
+    }
+    return { status: 200, type: 'application/x-swan-ranking-response', body: data, note: `tonpuusou yakuman ranking: ${note}; ${lines} lines` };
+  });
+}
+
 export async function handle(conn: Conn, path: string, raw: Uint8Array): Promise<Reply> {
+  if (path === '/swan-ranking') return yakuman(conn, raw);
   // parse_qsl: '+' is a space and %XX is decoded; the last value of a key wins.
   const form: Record<string, string> = {};
   for (const [k, v] of new URLSearchParams(strip(latin1(raw), '\r\n\0'))) form[k] = v;

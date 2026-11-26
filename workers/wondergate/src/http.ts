@@ -39,7 +39,7 @@ export function route(conn: Conn, rawHost: string, path: string, headers: Record
   const host = rawHost.split(':')[0].toLowerCase();
   if (path.startsWith('/service/charge/')) return (body) => charge.handle(conn, path, headers, body);
   if (host === 'wgg01.channel.or.jp' && path === '/service/buffersevolution') return (body) => buffers.handle(conn, body);
-  if (host === 'tongpuso.wgg.channel.or.jp' && path.startsWith('/cgi-bin/')) return (body) => tonpuusou.handle(conn, path, body);
+  if (host === 'tongpuso.wgg.channel.or.jp' && (path.startsWith('/cgi-bin/') || path === '/swan-ranking')) return (body) => tonpuusou.handle(conn, path, body);
   // For a PC browser (any host but the games' own)
   if (path.replace(/\/+$/, '') === '/tonpuusou' && !/\.(or\.jp|ne\.jp|co\.jp|com)$/.test(host)) return () => tonpuusou.page(conn);
   if (host === 'www2.sting.co.jp' && path === '/cgi-bin/wg/wiz.cgi') return () => wizardry.handle(conn, query);
