@@ -41,6 +41,7 @@ CONTENT_TYPE = "application/x-swan-ranking-response"
 #   name_fmt    f(owner as uploaded) -> owner as sent back (default: unchanged)
 #   empty_name  owner shown on the placeholder row of an empty course (default "-")
 #   count_fmt   f(rows) -> the row count after "<listname>=" (default: decimal)
+#   rank_fmt    f(your rank) -> the rank in the course line (default: decimal)
 def higher_is_better(score):
     return -int(score or 0)
 
@@ -52,6 +53,13 @@ def lower_is_better(score):
 def form_name(width):
     """Form-decode '+' to spaces and pad to a fixed width (D's Garage shows names)."""
     return lambda owner: owner.replace("+", " ")[:width].ljust(width)
+
+
+def one_char(limit):
+    """A number as one character, '0' + n. Raku Jongg's and Yamato's parsers read a lone character
+    as char - '0' whatever it is, but lose the units of a two-digit number ("15" reads as 10:
+    mov ax,10 / mul / add ax,dx, and MUL has cleared DX). Numbers past `limit` go as `limit`."""
+    return lambda n: chr(0x30 + min(n, limit))
 
 
 def gunpey_puzzle(score):
@@ -74,8 +82,11 @@ def pocketf_content(fields):
 
 
 GAMES = {
+    # Raku Jongg: your rank and the row count go as one character each (see one_char; parser
+    # ROM 0xBF248, 0xBF359). The game announces ranks 1-20 only, so anything lower goes as 21.
     "rakujang": {"courses": 3, "max_rows": 20, "name_max": 8, "header": False,
-                 "count_max": 99, "score": {None: (1, 6)}, "group": 1},
+                 "count_max": 99, "score": {None: (1, 6)}, "group": 1,
+                 "rank_fmt": one_char(21), "count_fmt": one_char(20)},
     "gunpeyex": {"courses": 5, "max_rows": 9, "name_max": 16, "header": True,
                  "count_max": 9999, "score": {None: (10, 6), 3: (1, 8)}, "group": 1,
                  "reply_fmt": {3: gunpey_puzzle}},
@@ -120,7 +131,7 @@ GAMES = {
     "yamato": {"courses": 1, "max_rows": 50, "name_max": 8,
                "header": lambda game: [time.strftime("date=%Y%m%d")],
                "count_max": 9999, "score": {None: (1, 5)}, "group": 1,
-               "count_fmt": lambda n: chr(0x30 + n)},
+               "count_fmt": one_char(50)},
 }
 
 
@@ -281,7 +292,8 @@ def handle(store, game, body):
         top = reply_score(cfg, course, rows[0][1] if rows else 0)
         fmt = cfg.get("course_fmt", "course={g}|{n}|{entrants}|{top}|{mine}|{rank}")
         out.append(fmt.format(g=g, n=course, entrants=min(total, cap), top=top,
-                              mine=reply_score(cfg, course, mine), rank=min(rank, cap)))
+                              mine=reply_score(cfg, course, mine),
+                              rank=cfg.get("rank_fmt", lambda r: r)(min(rank, cap))))
         # Raku Jongg's parser always reads at least one row: never send an empty table.
         if not ranked:
             ranked = [(1 if near is not None else first_row, (cfg.get("empty_name", "-"), "0", "0" * ew))]

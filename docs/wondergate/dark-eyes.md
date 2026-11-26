@@ -34,10 +34,10 @@ original nph scripts wrote their replies:
 
 | CGI | Request | Reply |
 |---|---|---|
-| `nph-login` | SRVC-ID, REQ-SERIAL | SRVC-RETCD, SRVC-TIME |
+| `nph-login` | SRVC-ID, REQ-SERIAL | SRVC-RETCD, SRVC-TIME, and **SRVC-ID** for a cart that sent `00000000` (see Customer IDs) |
 | `nph-account` | ACNT-ID, ACNT-SID (`BAN00E01` + ID + card blob), ACNT-CMD | ACNT-RETCD; body = message |
 | `nph-reqmatch` | MTCH-ID, NAME (SJIS, URL-encoded), LVL, PASS, RETRY | MTCH-RETCD 0/1 = keep polling every POLINT s (TIMEOUT s); 9 = error; **2 = matched**: MTCH-ID, NAME, LVL (opponent), SEED, MATCH (side), HOST, PATH (of nph-match), ACOUNT, BCOUNT, COUNT |
-| `nph-match` | MTCH-ID, OID, NAME, CMD + body | cmd 0 post party (RETCD 0; 1 = retry) · cmd 1 fetch the opponent's party (2 + body; 1 = not yet) · cmd 2 post my turn (3) · cmd 3 fetch the opponent's turn (5 + body; 4 = not yet) |
+| `nph-match` | MTCH-ID, OID, NAME, CMD + body | cmd 0 post party (RETCD 0; 1 = retry) · cmd 1 fetch the opponent's party (2 + body; 1 = not yet) · cmd 2 post my turn (3) · cmd 3 fetch the opponent's turn (5 + body; 4 = not yet) · cmd 4 the battle is over on this cart (6; anything else but 9 = ask again) |
 | `nph-upmrcnry` | MCUP-ID, PAY, NAME, CLASS, LVL, EXP, STR, DEX, INT, ATR, EM, RY, SK0-3, IT0-3, HP | MCUP-RETCD, MCUP-MID (8 chars) |
 | `nph-listmrcnry` | MCDL-ID, CLASS (race × class code), LVL | MCDL-RETCD, MCDL-NO n; body n × 49 bytes |
 | `nph-downmrcnry` | MCDN-ID, MID | MCDN-RETCD |
@@ -47,6 +47,31 @@ The party is four 90-byte character records, base64-encoded by the cartridge (48
 after decoding, `6800:16BA` checks every name byte against the allowed katakana (anti-cheat;
 a mismatch shows LOST). Turns are about 20 bytes each. Battles run in the cartridges; the
 server only relays.
+
+### Customer IDs (お客様ＩＤ)
+
+A new cartridge logs in with `X-SWAN-SRVC-ID: 00000000`. The login reply parser (`5900:20D6`)
+looks for `X-SWAN-SRVC-ID` in the **reply** when SRVC-RETCD is 0, 1 or 2, copies its value up to
+the LF to RAM `0x4759` and SRAM `0x6067`, and saves (`4000:D212`). The value must be 8 characters:
+the copy has no length check and the mercenary's MID starts at `0x6070`. Every later request
+carries it (ACNT-ID, MTCH-ID, MCUP-ID, MCDL-ID, MCDN-ID, WINF-ID). The connect menu's お客様ＩＤ
+(`4000:CFA8`) should show it; that screen wasn't looked at.
+
+Until 2026-11-25 we never sent one, so every cartridge stayed `00000000` and a player was known by
+hero name alone: two players with the same hero name could not be matched, and one's mercenary
+upload replaced the other's. Now a login with the blank ID gets 8 random hex digits (Bandai's
+format is lost). Checked in the game: the cart sent `ACNT-ID` and `MTCH-ID` with the new ID for the
+rest of the session, SRAM `0x6067` held it afterwards, and two carts with the same hero name
+(ｱｱ) were matched and exchanged parties. A mercenary registered before then (owner
+`00000000/<hero>`) passes to the cart's new ID the first time its worldinfo names that MID.
+
+### End of a battle (`nph-match` cmd 4)
+
+`5900:3A60` sends CMD 4 from the end-of-battle controller, then waits: RETCD 6 ends it, 9 is an
+error, anything else makes it ask again every POLINT until TIMEOUT. We answer 6 and drop the battle
+once both sides have said so (the other may still be collecting the last turn); a cart with no
+battle on record gets 6 as well. Before 2026-11-25 this was answered 9. From the ROM only: no
+battle has been played to its end against the server since, so the cart's side is unverified.
 
 ## Mercenaries and the world market (story mode)
 

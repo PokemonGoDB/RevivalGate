@@ -244,6 +244,13 @@ export async function handle(conn: Conn, path: string, body: Uint8Array): Promis
         const hall = hallOfFame(db);
         return reply(hall.length ? listing(db, hall) : new Uint8Array([0]), `${tag} idsrch hall of fame: ${hall.length}`);
       }
+      if (key === 'fd'.repeat(8)) {
+        // D1 Tamers' IDバトル searches with a blank key too (E000:381C) and lists what comes back as opponents
+        // to pick from. What Bandai listed is lost; ours is the newest tamers who have uploaded a party
+        // (IDアップロード or a ranking battle), not the caller.
+        const found = Object.keys(players).reverse().filter((k) => players[k].block && k !== pid).slice(0, 8);
+        return reply(found.length ? listing(db, found) : new Uint8Array([0]), `${tag} idsrch open list: ${found.length}`);
+      }
       const hits = Object.keys(players).filter((k) => players[k].block && (k === key || players[k].name === key));
       return reply(hits.length ? listing(db, hits) : new Uint8Array([0]), `${tag} idsrch ${key}: ${hits.length} found`);
     }

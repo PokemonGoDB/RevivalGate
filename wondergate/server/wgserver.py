@@ -58,7 +58,7 @@ def route(host, path, headers=None, query=""):
         return lambda body: charge.handle(path, headers or {}, body)
     if (host, path) == ("wgg01.channel.or.jp", "/service/buffersevolution"):
         return lambda body: buffers.handle(STORE, body)
-    if host == "tongpuso.wgg.channel.or.jp" and path.startswith("/cgi-bin/"):
+    if host == "tongpuso.wgg.channel.or.jp" and (path.startswith("/cgi-bin/") or path == "/swan-ranking"):
         return lambda body: tonpuusou.handle(path, body)
     if path.rstrip("/") == "/tonpuusou" and not host.endswith((".or.jp", ".ne.jp", ".co.jp", ".com")):
         return lambda body: tonpuusou.page(path)          # for a PC browser

@@ -64,7 +64,14 @@ interface Cfg {
   content?: (fields: Record<string, string>) => string | null;
   /** rows -> the row count after "<listname>=" (default: decimal) */
   countFmt?: (n: number) => string;
+  /** your rank -> the rank in the course line (default: decimal) */
+  rankFmt?: (n: number) => string;
 }
+
+/** A number as one character, '0' + n. Raku Jongg's and Yamato's parsers read a lone character as char - '0'
+ *  whatever it is, but lose the units of a two-digit number ("15" reads as 10: mov ax,10 / mul / add ax,dx, and
+ *  MUL has cleared DX). Numbers past `limit` go as `limit`. */
+const oneChar = (limit: number) => (n: number) => String.fromCharCode(0x30 + Math.min(n, limit));
 
 /** Form-decode '+' to spaces and pad to a fixed width (D's Garage shows names). */
 const formName = (width: number) => (owner: string) => owner.replace(/\+/g, ' ').slice(0, width).padEnd(width);
@@ -87,7 +94,12 @@ function pocketfContent(fields: Record<string, string>): string | null {
 const finalLapLower: Record<number, Order> = Object.fromEntries(Array.from({ length: 32 }, (_, i) => [i + 1, 'low']));
 
 export const GAMES: Record<string, Cfg> = {
-  rakujang: { courses: 3, maxRows: 20, nameMax: 8, header: false, countMax: 99, score: { default: [1, 6] }, group: 1 },
+  // Raku Jongg: your rank and the row count go as one character each (see oneChar; parser ROM 0xBF248, 0xBF359).
+  // The game announces ranks 1-20 only, so anything lower goes as 21.
+  rakujang: {
+    courses: 3, maxRows: 20, nameMax: 8, header: false, countMax: 99, score: { default: [1, 6] }, group: 1,
+    rankFmt: oneChar(21), countFmt: oneChar(20)
+  },
   gunpeyex: {
     courses: 5, maxRows: 9, nameMax: 16, header: true, countMax: 9999,
     score: { default: [10, 6], 3: [1, 8] }, group: 1, replyFmt: { 3: gunpeyPuzzle }
@@ -122,7 +134,7 @@ export const GAMES: Record<string, Cfg> = {
   // goes as one character, '0' + n (docs/wondergate/yamato.md).
   yamato: {
     courses: 1, maxRows: 50, nameMax: 8, header: () => [`date=${dt('Ymd')}`], countMax: 9999,
-    score: { default: [1, 5] }, group: 1, countFmt: (n) => String.fromCharCode(0x30 + n)
+    score: { default: [1, 5] }, group: 1, countFmt: oneChar(50)
   }
 };
 
@@ -412,7 +424,7 @@ export async function handle(conn: Conn, game: string, raw: Uint8Array): Promise
     const cap = cfg.countMax;
     const top = replyScore(cfg, course, t.page[0]?.score ?? '0');
     const v = { g, n: course, entrants: Math.min(t.total, cap), top, mine: replyScore(cfg, course, t.mine), rank: Math.min(t.rank, cap) };
-    out.push(cfg.courseFmt ? cfg.courseFmt(v) : `course=${v.g}|${v.n}|${v.entrants}|${v.top}|${v.mine}|${v.rank}`);
+    out.push(cfg.courseFmt ? cfg.courseFmt(v) : `course=${v.g}|${v.n}|${v.entrants}|${v.top}|${v.mine}|${cfg.rankFmt ? cfg.rankFmt(v.rank) : v.rank}`);
     // Raku Jongg's parser always reads at least one row: never send an empty table.
     const rows: (readonly [number, string, string, string])[] = ranked.length
       ? ranked.map(([i, r]) => [i, r.owner, r.score, r.extra] as const)

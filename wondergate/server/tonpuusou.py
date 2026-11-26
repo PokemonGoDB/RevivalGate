@@ -10,16 +10,34 @@ The cartridge computes the new rate itself after a ranked match and uploads it,
 with g = f - 1 (ROM 0x4F7F2): the game count its new rate was computed from, so
 the server can tell a fresh result from a resent or out-of-order one.
 An unknown ID is registered on first use with the password it came with; new
-players start at R1500.00 (the PC version's starting rate). See
-docs/wondergate/tonpuusou.md.
+players start at R1500.00 (the PC version's starting rate).
+
+The 全国ヤクマンランキング is a separate request, in Bandai's swan-ranking style
+(builder ROM 0x4EA13, reply parser 0xA1D4D):
+
+    POST /swan-ranking   *=<serial, 6 hex>&owner=<16 bytes>[&score=<n>%7C<count>%7C]...&list=BEST3%7C1%7C3
+        owner   the player's name, 16 bytes, each sent + 0x41; echoed back as sent
+        score   one per yakuman kind n = 1..15 the player has made (RAM 0x6C4, a word each)
+    Reply, read a line at a time (each at most 127 bytes with its CRLF) to Content-Length:
+        course=<g>|<nn>|...     picks a table and clears it: g = 2 is table 0 (the total),
+                                otherwise nn, exactly two digits at this column, is the table
+         BEST3=<k>              k rows follow, one digit, never 0 (the row loop would run 65,536
+                                times); this line and the rows start with a space
+         <r>|<count>|<owner>|   r = 1..3, count up to 5 digits, owner up to 16 bytes ending in '|'
+    Tables with no line in the reply stay empty; a reply with no line at all is error 599
+    (その他のエラー). See docs/wondergate/tonpuusou.md.
 """
 import json
 import pathlib
+import re
 import time
 import urllib.parse
 
 DB = pathlib.Path(__file__).resolve().parent.parent / "data" / "tonpuusou.json"
+YAKUMAN_DB = DB.with_name("tonpuusou-yakuman.json")
 START_RATE = 150000
+KINDS = 15              # yakuman kinds the cart counts and uploads
+CONTENT_TYPE = "application/x-swan-ranking-response"
 
 
 def load():
@@ -35,7 +53,49 @@ def digits(v, n):
     return v.isdigit() and 0 < len(v) <= n
 
 
+def yakuman(body):
+    """The national yakuman ranking: keep this player's counts, send back the top 3 of each
+    kind and of the total."""
+    db = json.loads(YAKUMAN_DB.read_text()) if YAKUMAN_DB.exists() else {"players": {}}
+    players = db["players"]
+    serial = re.match(rb"\*=([0-9A-Za-z]{1,8})", body)
+    at = body.find(b"&owner=")
+    owner = body[at + 7:at + 23] if at >= 0 else b""
+    scores = {int(n): int(c) for n, c in re.findall(rb"&score=(\d{1,2})%7[Cc](\d{1,5})%7[Cc]", body[at + 23:])}
+    scores = {n: min(c, 0xFFFF) for n, c in scores.items() if 1 <= n <= KINDS and c}
+    note = "no yakuman yet"
+    # The owner goes back to every player inside a '|'-separated line: one that would break
+    # the line isn't kept.
+    if serial and len(owner) == 16 and scores and not any(b < 0x20 or b == 0x7C for b in owner):
+        key = serial.group(1).decode().upper() + ":" + owner.hex()
+        p = players.setdefault(key, {"owner": owner.hex(), "counts": [0] * KINDS})
+        for n, c in scores.items():
+            p["counts"][n - 1] = max(p["counts"][n - 1], c)     # the cart's counts only grow
+        p["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        YAKUMAN_DB.parent.mkdir(exist_ok=True)
+        YAKUMAN_DB.write_text(json.dumps(db, indent=1))
+        note = f"{sum(p['counts'])} yakuman of {sum(1 for c in p['counts'] if c)} kinds"
+    out = []
+    for table in range(KINDS + 1):
+        count = (lambda p: sum(p["counts"])) if table == 0 else (lambda p: p["counts"][table - 1])
+        top = sorted((p for p in players.values() if count(p)), key=lambda p: -count(p))[:3]
+        # The total's course line always goes, rows or not: an empty reply is error 599.
+        if not top and table:
+            continue
+        head = "course=2|01" if table == 0 else f"course=1|{table:02d}"
+        out.append(f"{head}|{sum(1 for p in players.values() if count(p))}|{count(top[0]) if top else 0:05d}".encode())
+        if not top:
+            continue
+        out.append(f" BEST3={len(top)}".encode())
+        out += [f" {r}|{min(count(p), 0xFFFF):05d}|".encode() + bytes.fromhex(p["owner"]) + b"|"
+                for r, p in enumerate(top, 1)]
+    return (200, CONTENT_TYPE, b"".join(line + b"\r\n" for line in out),
+            f"tonpuusou yakuman ranking: {note}; {len(out)} lines")
+
+
 def handle(path, body):
+    if path == "/swan-ranking":
+        return yakuman(body)
     form = dict(urllib.parse.parse_qsl(body.decode("latin-1").strip("\r\n\x00")))
     pid, pw = form.get("c", ""), form.get("d", "")
     players = load()

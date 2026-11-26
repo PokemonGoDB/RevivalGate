@@ -50,7 +50,7 @@ function exchange(port, data, ms = 15000) {
 }
 
 /** Values that legitimately differ between two runs: clock readings and random numbers. */
-function normalize(buf, what = '') {
+function normalize(buf, what = '', path = '') {
   let s = buf.toString('latin1');
   s = s.replace(/date=\d{8,12}/g, 'date=<DATE>');
   s = s.replace(/date\d{14}3/g, 'date<TIME>3');
@@ -59,13 +59,15 @@ function normalize(buf, what = '') {
   s = s.replace(/(X-SWAN-CNTS-AID: )[A-Za-z0-9_-]{80}/g, '$1<TOKEN>');
   s = s.replace(/(X-SWAN-SRVC-TIME: )\d+/g, '$1<TIME>'); // Dark Eyes login
   s = s.replace(/(X-SWAN-MTCH-SEED: )\d+/g, '$1<SEED>'); // Dark Eyes match seed
+  s = s.replace(/(X-SWAN-SRVC-ID: )[0-9A-F]{8}/g, '$1<ID>'); // Dark Eyes: the customer ID issued at login
   s = s.replace(/((?:PPP|MAIL)PASSWORD:)[0-9a-f]{8}/g, '$1<PASSWORD>'); // mail auto-setup
   s = s.replace(/info=([01]{6})[01]{7}\r\n/g, 'info=$1<CARDS>\r\n'); // Pocket Fighter: the Worker rotates the 7 card flags daily
   if (s.includes('BFEVREC=')) s = s.replace(/\b20\d{6}\b/g, '<DATE>');
   const split = s.indexOf('\r\n\r\n') >= 0 ? s.indexOf('\r\n\r\n') + 4 : s.indexOf('\n\n') + 2;
   const head = s.slice(0, split);
   let body = s.slice(split);
-  if (what.includes('starhearts')) body = body.replace(/^C0000[0-9A-F]{8}$/, 'C0000<MEMBER>');
+  // Star Hearts: only the member number (?0005) is random; the visitor counts (?0003, ?0004) must match.
+  if (what.includes('starhearts') && /\?0005/.test(path)) body = body.replace(/^C0000[0-9A-F]{8}$/, 'C0000<MEMBER>');
   if (/dm4(rankbtl|idbtl)/.test(what) && body.length > 3) body = body.slice(0, 2) + '<SEED>' + body.slice(3);
   if (/dmB(rankbtl|idbtl)/.test(what) && body.length > 3) body = body.slice(0, 1) + '<SEED>' + body.slice(2); // Brave Tamer: seed right after the result
   if (what.includes('/cgi-bin/accsess.cgi') && body.startsWith('T2')) body = 'T2<CLOCK>' + body.slice(5);
@@ -160,8 +162,8 @@ for (const e of index) {
   const port = e.kind === 'bpl' ? 5555 : String(e.host).endsWith(':10000') ? 10000 : 80;
   const a = await exchange(PY[port], data);
   const b = await exchange(WK[port], data);
-  const na = normalize(a.bytes, what);
-  const nb = normalize(b.bytes, what);
+  const na = normalize(a.bytes, what, e.path ?? '');
+  const nb = normalize(b.bytes, what, e.path ?? '');
   const h = (results.byHost[what] ??= { same: 0, differ: 0 });
   if (na === nb && a.timeout === b.timeout) {
     results.same++;

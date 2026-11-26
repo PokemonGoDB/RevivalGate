@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-10-15",
+  "updated": "2026-11-25",
   "statuses": {
     "working": "Rebuilt on our servers and verified headless on the real game code by normal play.",
     "shortcut-verified": "Rebuilt and working, but verified by setting game state directly (RAM/SRAM pokes or a patched ROM copy) instead of reaching it by normal play.",
@@ -256,13 +256,20 @@
       "title": "Tonpuusou",
       "doc": "docs/wondergate/tonpuusou.md",
       "replays": [
-        "tonpuusou"
+        "tonpuusou",
+        "tonyakuman"
       ],
       "features": [
         {
           "name": "Rating (R) download and upload, ID and password",
           "status": "working",
           "verified": "in-game"
+        },
+        {
+          "name": "National yakuman ranking (register and view)",
+          "status": "working",
+          "verified": "in-game",
+          "notes": "The top three for each kind of yakuman. The request and the tables shown were checked in the game with other players' counts placed on the server; an upload from a cartridge that has made a yakuman hasn't been seen yet."
         },
         {
           "name": "Link results to the PC version",
@@ -406,7 +413,8 @@
       "doc": "docs/wondergate/digimon-d1-tamers.md",
       "replays": [
         "d1tamers",
-        "d1ranking"
+        "d1ranking",
+        "d1idbattle"
       ],
       "features": [
         {

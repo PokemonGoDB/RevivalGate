@@ -57,10 +57,16 @@ def raku_parse(buf):
     up = bytes(c - 32 if 97 <= c <= 122 else c for c in buf)
     i, out = 0, []
 
-    def two_digits(i):
+    def two_digits(i, units_lost=False):
         # reads buf[i], buf[i+1]; one digit if the second is CR. Leaves i on the second.
+        # The rank (0xBF248) and row-count (0xBF359) reads do "mov ax,10 / mul bx / add ax,dx":
+        # MUL clears DX, where the units digit was, so two digits read as the tens alone
+        # ("15" -> 10). Only the stage read (0xBF566, "add ax,bx") is right. A single
+        # character is read as char - '0' whatever it is, so ':' reads as 10, 'D' as 20.
         a, b = buf[i], buf[i + 1]
-        return (a - 48 if b == 13 else (a - 48) * 10 + (b - 48)), i + 1
+        if b == 13:
+            return a - 48, i + 1
+        return (a - 48) * 10 + (0 if units_lost else b - 48), i + 1
 
     for _ in range(3):
         i = up.index(b"COURSE", i)
@@ -69,9 +75,9 @@ def raku_parse(buf):
             i += 1
             if buf[i] == 0x7C:
                 pipes += 1
-        course_field, i = two_digits(i + 1)
+        course_field, i = two_digits(i + 1, units_lost=True)
         i = up.index(b"RAKUJANG=", i) + len(b"RAKUJANG=")
-        k, i = two_digits(i)
+        k, i = two_digits(i, units_lost=True)
         rows, bp = [], 0
         while True:
             i += 1
@@ -130,6 +136,7 @@ def check(name, ok, detail=""):
 async def main():
     with tempfile.TemporaryDirectory() as tmp:
         wgserver.STORE = swan_ranking.Store(f"{tmp}/t.sqlite")
+        wgserver.CAPTURES = pathlib.Path(tmp) / "captures"   # these aren't a game's requests: keep them out of captures/
         srv = await asyncio.start_server(wgserver.http_conn, "127.0.0.1", 0)
         port = srv.sockets[0].getsockname()[1]
 
@@ -149,7 +156,12 @@ async def main():
         for p in range(25):
             await session(port, f"P{p:05d}", f"N{p}", [(f"{p:06d}", "01"), ("000000", "00"), ("000000", "00")])
         r = await session(port, "FFFFFF", "3N_hS[4", [("001000", "02"), ("000000", "00"), ("000000", "00")])
-        check("20-row cap, two-digit row count", r[0][1] == 20 and len(r[0][2]) == 20, repr(r[0][:2]))
+        check("20-row cap, and the game reads the row count as 20", r[0][1] == 20 and len(r[0][2]) == 20, repr(r[0][:2]))
+        # 27 players now: Bob, us, then N24 down to N0.
+        r = await session(port, "P00010", "N10", [("000010", "01"), ("000000", "00"), ("000000", "00")])
+        check("a two-digit rank reaches the game whole (N10 is 17th)", r[0][0] == 17, repr(r[0][:2]))
+        r = await session(port, "P00000", "N0", [("000000", "01"), ("000000", "00"), ("000000", "00")])
+        check("past 20th the game reads a rank it shows no message for", r[0][0] > 20, repr(r[0][:2]))
 
         srv.close()
     print(f"\n{'ALL PASS' if not FAILS else f'{FAILS} FAILED'}")
