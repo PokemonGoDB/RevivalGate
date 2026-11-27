@@ -1,0 +1,11 @@
+POST /cgi-bin/dark/nph-match.cgi HTTP/1.1
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Host: battleg1.dark-eyes.com
+Content-Length:  20
+X-SWAN-MTCH-ID: BF75FC97
+X-SWAN-MTCH-OID: 7F6B5B65
+X-SWAN-MTCH-NAME: %B6%B1
+X-SWAN-MTCH-CMD: 2
+
+AQ///wACCBD//wgA////

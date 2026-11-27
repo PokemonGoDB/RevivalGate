@@ -10,6 +10,7 @@ status 0 = ok; record size depends on the request type (table at ROM A000:0382).
 Probe hooks (environment, for reverse-engineering): NC_MARK=1|tens|units fills
 the type-6 bulletin with markers, NC_BULL_PATCH=OFF:text patches it,
 NC_COURSE_MARK=1 marks types 5/20/21, NC_ZERO=1 zero-fills them.
+Test hook: NC_TODAY=yyyy-mm-dd fixes the date (the tour's week and the type-4 clock).
 """
 import asyncio
 import json
@@ -37,24 +38,48 @@ SIZES = [0x1F, 0x16, 0x0E, 0x0E, 0x12, 0x111, 0xCC, 0x14, 0x26, 0x14, 0x2E, 0x45
          0x08, 0x24, 0x29, 0x1B, 0x10, 0x0E, 0x20, 0x262, 0x480, 0x08]
 
 
-def bulletin(size, today=None):
-    """Type 6: this month's Net Tour round (body after WSD\\r): round number
-    (word +0), stage (word +4, see stage_word), qualifier cutoff rank (word +6),
-    entry fee in yen (word +10), start and end dates as yyyymmdd text (+168, +176;
-    shown as yy/mm/dd), course id (+0x96)."""
+QUALIFY = 100     # the qualifier's best 100 may enter the final (the manual; shown by the bulletin)
+WINNERS = 32      # the final's "N位 までに はいれば にゅうしょう": our number, what 前回の入賞者 lists
+
+
+def today():
+    """The tour's date: Japan time, as the type-4 clock. NC_TODAY=yyyy-mm-dd fixes it."""
+    import datetime
+    import os
+    fixed = os.environ.get("NC_TODAY")
+    if fixed:
+        return datetime.date.fromisoformat(fixed)
+    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).date()
+
+
+def tour_dates(day):
+    """The month's tour (our rules, see the doc): the qualifier runs from the 1st to the
+    day before the fourth Monday, the final from the fourth Monday to the end of the
+    month. Returns (qualifier start, qualifier end, final start, final end)."""
     import calendar
     import datetime
-    today = today or datetime.date.today()
+    first = day.replace(day=1)
+    final = first + datetime.timedelta(days=(7 - first.weekday()) % 7 + 21)
+    last = day.replace(day=calendar.monthrange(day.year, day.month)[1])
+    return first, final - datetime.timedelta(days=1), final, last
+
+
+def bulletin(size, day=None):
+    """Type 6: this month's Net Tour round (body after WSD\\r): round number
+    (word +0), stage (word +4, see stage_word), qualifier cutoff rank (word +6),
+    entry fee in yen (word +10), the qualifier's start and end dates as yyyymmdd text
+    (+168, +176; shown as yy/mm/dd), course id (+0x96). Shown only in the final
+    (stage 4): prize cutoff rank (word +8), the final's start and end dates (+184, +192)."""
+    day = day or today()
     body = bytearray(size - 4)
-    rnd = tour_round(today)
-    last = calendar.monthrange(today.year, today.month)[1]
+    rnd = tour_round(day)
     body[0:2] = rnd.to_bytes(2, "little")
-    body[4:6] = stage_word(today).to_bytes(2, "little")
-    body[6:8] = (100).to_bytes(2, "little")
+    body[4:6] = stage_word(day).to_bytes(2, "little")
+    body[6:8] = QUALIFY.to_bytes(2, "little")
+    body[8:10] = WINNERS.to_bytes(2, "little")
     body[10:12] = (0).to_bytes(2, "little")
-    body[168:176] = today.strftime("%Y%m01").encode()
-    body[176:184] = today.replace(day=last).strftime("%Y%m%d").encode()
-    body[0x96] = course_of(today)
+    body[168:200] = "".join(d.strftime("%Y%m%d") for d in tour_dates(day)).encode()
+    body[0x96] = course_of(day)
     import os
     for patch in filter(None, os.environ.get("NC_BULL_PATCH", "").split(",")):
         off, _, text = patch.partition(":")       # probe hook: OFF:ascii
@@ -67,8 +92,7 @@ def course_of(day):
 
 
 def tour_round(day=None):
-    import datetime
-    day = day or datetime.date.today()
+    day = day or today()
     return max((day.year - 2026) * 12 + day.month - 9, 1)      # Oct 2026 = round 1
 
 
@@ -96,12 +120,12 @@ def stage_word(day):
     downloads a round again only when the bulletin's round or this word differs from the
     saved ones (6000:1946; otherwise あたらしい データは ありませんでした 708), so it has
     to change whenever the conditions do: every Monday. The cart reads it as signed:
-    below 4 is the qualifier, 4 is the final (the cart then asks types 10, 11 and 12,
-    which we don't serve: see the doc) and above 4 is refused (errors 704/705). So
-    weeks 0-3 go out as they are and weeks 4 and 5 as -1 and -2: still the qualifier
-    to the cart. The values are ours; what Bandai sent is not known."""
-    week = tour_week(day)
-    return week if week < 4 else (3 - week) & 0xFFFF
+    below 4 is the qualifier, 4 is the final (the cart then asks types 10, 11 and 12
+    instead of 7, 8 and 9) and above 4 is refused (errors 704/705). So it is the week
+    of the month, and the final starts on the fourth Monday; a fifth Monday changes
+    nothing (still 4: the final runs on to the end of the month). That the word counts
+    weeks is our reading; what Bandai sent is not known."""
+    return min(tour_week(day), 4)
 
 
 def week_conditions(day):
@@ -111,8 +135,8 @@ def week_conditions(day):
     and week, so the Worker port gives the same bytes), so every player gets the
     same round. Returns (rain, wind strength in m, wind direction) per hole."""
     import hashlib
-    week = tour_week(day)
-    final = week >= 4
+    week = stage_word(day)
+    final = week == 4
     seed = f"wclassic {day:%Y-%m} week {week}"
     a = hashlib.sha256((seed + " a").encode()).digest()
     b = hashlib.sha256((seed + " b").encode()).digest()
@@ -130,7 +154,7 @@ def net_round(size, day=None):
       +0     round (word; 0 = no tour: the game menu then has no ネットツアー)
       +2..   5 words (+4 = stage, as in the bulletin: stage_word), then a word list
              from +0xC ending in 0, 8 words at +0xB2
-      +0xB2  start date, +0xBA end date, "yyyymmdd" text (the entry deadline)
+      +0xB2  start date, +0xBA end date, "yyyymmdd" text (this stage's entry period)
       +0xC2  18 hole indexes, each a built-in course * 18 + hole (table 6000:50FE)
       +0xD4  rain: byte +0xD4 = holes 1-8, byte +0xD5 = holes 10-17, MSB first.
              The parser takes 9 holes from each byte, so holes 9 and 18 are always dry
@@ -140,16 +164,14 @@ def net_round(size, day=None):
       +0xE9  18 (x, y) byte pairs: pin position; 0, 0 = the hole's default pin
     We play one built-in course's 18 holes; the weather and wind change every
     Monday (week_conditions)."""
-    import calendar
-    import datetime
     import os
-    day = day or datetime.date.today()
+    day = day or today()
     body = bytearray(size - 4)
     body[0:2] = tour_round(day).to_bytes(2, "little")
     body[4:6] = stage_word(day).to_bytes(2, "little")
-    last = calendar.monthrange(day.year, day.month)[1]
-    body[0xB2:0xBA] = day.strftime("%Y%m01").encode()
-    body[0xBA:0xC2] = day.replace(day=last).strftime("%Y%m%d").encode()
+    # This stage's own dates: the cart refuses an entry outside them (706 before, 707 after).
+    dates = tour_dates(day)[2:] if stage_word(day) == 4 else tour_dates(day)[:2]
+    body[0xB2:0xC2] = "".join(d.strftime("%Y%m%d") for d in dates).encode()
     rain, strength, direction = week_conditions(day)
     for h in range(18):
         if rain[h] and h % 9 < 8:                # holes 9 and 18 have no bit
@@ -167,9 +189,28 @@ def net_round(size, day=None):
 
 
 def standings(db, rnd):
-    """[(member id, score)] of a round, best first (scores are strokes over par)."""
+    """[(member id, score)] of a round's qualifier, best first (a player's best entry
+    of the month, strokes over par). Equal scores stay in the order they were entered
+    (the manual's rule): the table is kept in that order."""
     rows = db["scores"].get(str(rnd), {})
-    return sorted(rows.items(), key=lambda kv: (kv[1], kv[0]))
+    return sorted(rows.items(), key=lambda kv: kv[1])
+
+
+def final_board(db, rnd):
+    """[(member id, [scores])] of a round's final, best total first, equal totals in
+    the order they were reached. While the final runs, a player with one score is on it
+    with that score (the cart calls this rank provisional, ざんてい); once the month is
+    over only the players with both scores are left (1かい だけでは しっかく)."""
+    rows = db.get("finals", {}).get(str(rnd), {}).items()
+    running = rnd == tour_round()
+    return sorted((r for r in rows if running or len(r[1]) == 2), key=lambda r: sum(r[1]))
+
+
+def rank_of(rows, uid):
+    """A player's rank among (member id, value) rows, as the cart numbers its own
+    ranking list: equal values share a rank (2T, 2T, then 4). 0 = not in the rows."""
+    values = dict(rows)
+    return 1 + sum(v < values[uid] for v in values.values()) if uid in values else 0
 
 
 def signed(v):
@@ -177,10 +218,13 @@ def signed(v):
 
 
 def ranking_rows(kind, req, db):
-    """Type 8: this round (params round(4) 00 00 start count), name +0, score +0x20.
-    Type 11: previous winners (params round(4) start count), name +0,
-    prefecture +0x10, score +0x37. Type 14: past rounds, round +2, name +6,
-    score +0x16. Names are the member card's handle (8 two-byte characters)."""
+    """Type 8: this round's qualifier (params round(4) 00 00 start count), name +0,
+    score +0x20. Type 11: a round's final (params round(4) start count), asked for
+    the ranking during the final and for 前回の入賞者: name +0, prefecture +0x10, the two
+    scores +0x17 and +0x27 (the ranking adds them up, parser 6000:4DAC), their total
+    +0x37 (前回の入賞者 shows it, 6000:4EC6). Type 14: the best final totals of past
+    rounds, round +2, name +6, score +0x16. Names are the member card's handle
+    (8 two-byte characters)."""
     p = req[5:]
     size = SIZES[kind]
     out = []
@@ -189,7 +233,8 @@ def ranking_rows(kind, req, db):
         at = 6 if kind == 8 else 4
         start = int.from_bytes(p[at:at + 2], "little") or 1
         count = int.from_bytes(p[at + 2:at + 4], "little") or 32
-        for uid, score in standings(db, rnd)[start - 1:start - 1 + count]:
+        table = standings(db, rnd) if kind == 8 else final_board(db, rnd)
+        for uid, score in table[start - 1:start - 1 + count]:
             m = db["members"].get(uid, {})
             body = bytearray(size - 4)
             body[0:16] = bytes.fromhex(m.get("handle", "00" * 16))
@@ -197,11 +242,14 @@ def ranking_rows(kind, req, db):
                 body[0x20:0x22] = signed(score)
             else:
                 body[0x10] = m.get("pref", 0)
-                body[0x37:0x39] = signed(score)
+                body[0x17:0x19] = signed(score[0])
+                body[0x27:0x29] = signed(sum(score[1:]))
+                body[0x37:0x39] = signed(sum(score))
             out.append(b"WSD\r" + bytes(body))
     else:
-        rows = [(score, rnd, uid) for rnd in db["scores"] if int(rnd) < tour_round()
-                for uid, score in db["scores"][rnd].items()]
+        finals = db.get("finals", {})
+        rows = [(sum(score), rnd, uid) for rnd in finals if int(rnd) < tour_round()
+                for uid, score in finals[rnd].items() if len(score) == 2]
         for score, rnd, uid in sorted(rows)[:32]:
             m = db["members"].get(uid, {})
             body = bytearray(size - 4)
@@ -250,18 +298,65 @@ def answer(req, session=None):
             log(f"WSC type 2 (card change): {uid}{'' if issued else ' (not a member ID of ours: not kept)'}")
             return reply(0, [b"WSD\r" + uid.encode("latin-1")], size)
         if kind == 9:
-            # Net Tour entry (after the type-4 clock): round(4), 2 bytes, score
-            # (signed word, strokes over par). An empty reply completes it.
+            # Net Tour entry in the qualifier (after the type-4 clock): round(4), the
+            # stage word, score (signed word, strokes over par). An empty reply
+            # completes it.
             rnd = int.from_bytes(req[5:9], "little")
             score = int.from_bytes(req[11:13], "little", signed=True) if len(req) >= 13 else 0
             uid = session.get("user", "")
+            log(f"WSC type 9: entry round {rnd}, {uid} {score:+d}")
+            # Only while this month's qualifier is open: its table decides who may
+            # enter the final. Otherwise もくてきの データが みつかりませんでした 712
+            # (the cart's own date check comes first: 707).
+            if rnd != tour_round() or stage_word(today()) == 4:
+                return reply(2)
             db = load()
             best = db["scores"].setdefault(str(rnd), {})
             if uid not in best or score < best[uid]:
+                best.pop(uid, None)              # a better score counts from now (ties)
                 best[uid] = score
             save(db)
-            log(f"WSC type 9: entry round {rnd}, {uid} {score:+d}")
             return reply()
+        if kind == 12:
+            # Net Tour entry in the final, same params as type 9. A player's first two
+            # scores are kept (the cart sends no more; it adds them up itself). An empty
+            # reply completes it; an error status leaves the score on the cart.
+            rnd = int.from_bytes(req[5:9], "little")
+            score = int.from_bytes(req[11:13], "little", signed=True) if len(req) >= 13 else 0
+            uid = session.get("user", "")
+            log(f"WSC type 12: final entry round {rnd}, {uid} {score:+d}")
+            if rnd != tour_round() or stage_word(today()) != 4:
+                return reply(2)                  # no final running: 712
+            db = load()
+            table = db.setdefault("finals", {}).setdefault(str(rnd), {})
+            mine = table.pop(uid, [])
+            # Not among the qualifier's best 100 (the cart turns away a player with no
+            # qualifier entry by itself), or a third score:
+            # うけつけにんずうを こえたため とうろくが できません 715
+            qualified = 0 < rank_of(standings(db, rnd), uid) <= QUALIFY
+            if not qualified or len(mine) >= 2:
+                log(f"WSC type 12: refused ({'two scores already' if qualified else 'not qualified'})")
+                return reply(7)
+            table[uid] = mine + [score]          # back in at the end: ties go to the earlier total
+            save(db)
+            return reply()
+        if kind == 10:
+            # あなたの順位 in the final (params round(4)): rank word +2, and word +0x1E
+            # 0 = "5位（ざんてい）" (one score so far), not 0 = the rank alone. +0 is not
+            # shown (we put the number of players on the board there). A player who is
+            # not on the board: もくてきの データが みつかりませんでした 712.
+            rnd = int.from_bytes(req[5:9], "little")
+            board = final_board(load(), rnd)
+            uid = session.get("user", "")
+            rank = rank_of([(u, sum(s)) for u, s in board], uid)
+            log(f"WSC type 10: {uid} final rank {rank} of {len(board)} in round {rnd}")
+            if not rank:
+                return reply(2)
+            body = bytearray(size - 4)
+            body[0:2] = len(board).to_bytes(2, "little")
+            body[2:4] = rank.to_bytes(2, "little")
+            body[0x1E] = int(len(dict(board)[uid]) == 2)
+            return reply(0, [b"WSD\r" + bytes(body)], size)
         if kind == 6 and not __import__("os").environ.get("NC_MARK"):
             log("WSC type 6: tour bulletin")
             return reply(0, [bulletin(size)], size)
@@ -304,6 +399,7 @@ def answer(req, session=None):
             # before an entry (a past date gives すでに しめきりが すぎていました 707).
             import datetime
             now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
+            now = datetime.datetime.combine(today(), now.time())
             log(f"WSC type 4: clock {now:%Y%m%d%H%M%S}")
             return reply(0, [b"WSD\r" + now.strftime("%Y%m%d%H%M%S").encode()], size)
         if kind == 22:
@@ -352,12 +448,12 @@ def answer(req, session=None):
                 return reply()
             return reply(0, [b"WSD\r" + bytes.fromhex(shot["header"])], size)
         if kind == 7:
-            # あなたの順位 (params round(4)): rank word +2 (shown as "18位"); +0
-            # is not shown (we put the number of entrants there).
+            # あなたの順位 in the qualifier (params round(4)): rank word +2 (shown as
+            # "18位"); +0 is not shown (we put the number of entrants there).
             rnd = int.from_bytes(req[5:9], "little")
-            table = [uid for uid, _ in standings(load(), rnd)]
+            table = standings(load(), rnd)
             uid = session.get("user", "")
-            rank = table.index(uid) + 1 if uid in table else 0
+            rank = rank_of(table, uid)
             log(f"WSC type 7: {uid} rank {rank} of {len(table)} in round {rnd}")
             body = len(table).to_bytes(2, "little") + rank.to_bytes(2, "little")
             return reply(0, [b"WSD\r" + body], size)

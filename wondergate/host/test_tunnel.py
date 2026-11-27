@@ -413,6 +413,39 @@ def main(host_bin):
           r == frame(0x11, 0x0F, bytes([sid, 90]) + reply), r and r.hex(" "))
     con.close()
 
+    # ---- the game's own receive wait (the receive's third parameter, seconds) ----
+    phone, con, _, _ = session(host_bin)
+    cid, tid, _ = open_sock(con, phone)
+    t0 = time.time()
+    r = con.cmd(frame(0x11, 0x0F, bytes([cid, 0x40, 1])))
+    dt = time.time() - t0
+    check("recv with wait 1 and nothing buffered: 0 bytes after ~1 s, not 2",
+          r == frame(0x11, 0x0F, bytes([cid, 0])) and 0.8 < dt < 1.6, f"{r} after {dt:.2f}s")
+    t0 = time.time()
+    con.send(frame(0x11, 0x0D, bytes([cid, 0x40, 5])))
+    time.sleep(3)
+    phone.send(bytes([P_DATA, tid]) + b"ok\n")
+    r = con.reply()
+    dt = time.time() - t0
+    check("line recv with wait 5: a line arriving 3 s later comes back in that answer",
+          r == frame(0x11, 0x0D, bytes([cid, 3]) + b"ok\n") and 2.8 < dt < 4, f"{r} after {dt:.2f}s")
+    con.send(frame(0x11, 0x0F, bytes([cid, 0x40, 30])))
+    time.sleep(1)
+    t0 = time.time()
+    r = con.cmd(frame(0x02, 0x01, b"\x03"))
+    dt = time.time() - t0
+    check("recv with wait 30, console sends again after 1 s: no answer to the recv, the new command answered at once",
+          r == frame(0x02, 0x02, b"\x02") and dt < 0.5, f"{r} after {dt:.2f}s")
+    t0 = time.time()
+    con.send(frame(0x11, 0x0F, bytes([cid, 0x40, 30])))
+    time.sleep(1)
+    phone.send(bytes([P_CLOSE, tid, 0]))
+    r = con.reply()
+    dt = time.time() - t0
+    check("recv with wait 30, server closes after 1 s: closed (FF) at once",
+          r == frame(0x11, 0x0F, bytes([cid, 0xFF])) and 0.8 < dt < 2, f"{r} after {dt:.2f}s")
+    con.close()
+
     print(f"\n{'ALL PASS' if not FAILS else f'{FAILS} FAILED'}")
     return 1 if FAILS else 0
 

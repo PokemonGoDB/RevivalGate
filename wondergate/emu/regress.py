@@ -9,7 +9,8 @@ Each replay runs against its own fresh copy of the server (in a temp folder, por
 WG_REGRESS_OFFSET, default 3000), so nothing touches a server you're running or the repo's data,
 and one replay's uploads never change what the next one sees. A folder emu/seeds/<key>/ is copied
 into that server's data/ first, for replays that need other players on the server; a NAME.sql in
-it is run into data/NAME.sqlite instead (wg.sql fills the rankings).
+it is run into data/NAME.sqlite instead (wg.sql fills the rankings), and a server.env in it (NAME=VALUE
+lines) sets the server's test hooks for that replay, such as a fixed date.
 
 Pass = all of:
   - the adapter log shows an HTTP 200 reply (or the optional 4th column's text, for games that
@@ -99,15 +100,18 @@ class Server:
     def restart(self, key):
         self.stop()
         shutil.rmtree(self.work / "data", ignore_errors=True)
+        env = {}
         if (SEEDS / key).is_dir():
-            shutil.copytree(SEEDS / key, self.work / "data", ignore=shutil.ignore_patterns("*.sql"))
+            shutil.copytree(SEEDS / key, self.work / "data", ignore=shutil.ignore_patterns("*.sql", "server.env"))
+            if (SEEDS / key / "server.env").exists():  # NAME=VALUE lines: the server's test hooks, e.g. a fixed date
+                env = dict(line.split("=", 1) for line in (SEEDS / key / "server.env").read_text().split() if "=" in line)
             for script in sorted((SEEDS / key).glob("*.sql")):  # wg.sql fills data/wg.sqlite
                 db = sqlite3.connect(self.work / "data" / script.with_suffix(".sqlite").name)
                 db.executescript(script.read_text())
                 db.close()
         self.proc = subprocess.Popen([sys.executable, "-I", str(self.work / "server" / "wgserver.py")],
                                      cwd=self.work, stdout=self.log, stderr=self.log,
-                                     env={**os.environ, "WG_PORT_OFFSET": str(OFFSET)})
+                                     env={**os.environ, **env, "WG_PORT_OFFSET": str(OFFSET)})
         for _ in range(100):
             try:
                 socket.create_connection(("127.0.0.1", 8080 + OFFSET), timeout=0.2).close()

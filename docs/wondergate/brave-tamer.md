@@ -73,8 +73,11 @@ Data units:
 - **record** (55 bytes, built by `C9F7:3F97` from a 0x6D-byte party slot at `DS:0932`): +0 present
   (1, `FF` = empty slot), +1 Digimon number, +4 nickname[6], +0x0A..0x11 caps HP, DP, AP, PP (words),
   +0x12..0x19 caps SP, LP, PAPP, TAPP, SCPP, PCPP, EXPP, YPPP (bytes; the レーダーチャート values),
-  +0x1A form count, +0x1B five form numbers (words), +0x25.. more slot bytes. Current HP etc. are not
-  sent; the battle recomputes them (`C9F7:4319`).
+  +0x1A form count, +0x1B five form numbers (words; Digimon numbers, the first its own: in battle
+  each one gives that form's technique), +0x25 item count, +0x26 four item numbers, +0x2A twelve
+  percent bytes (a stat is its cap × percent / 100; all 100 in the test party), +0x36 a class byte
+  (0–3). Current HP etc. are not sent; the battle recomputes them (`C9F7:4319`, see
+  [The battle](#the-battle-mapped-2026-11-27)).
 - **block** (191 bytes, built at `DS:3818`): the profile, then three records.
 
 | CGI | Builder | Body | Reply |
@@ -122,8 +125,11 @@ and data file.
 - IDs are eight digits, stored as bytes 0–9. Handles are unique per game.
 - Ladder as in D1 Tamers: a challenger fights the player one place above, and since the result is
   decided in the cartridge and never sent, the server guesses it from party strength, from the record
-  caps (HP + DP + 4 × (AP + PP + SP)); a tie leaves the order. This is our rule, and the ranking shown
-  right after the battle is already the server's guess.
+  caps (HP + DP + 4 × (AP + PP + SP)). Since 2026-11-27 a tie goes to the challenger in this game
+  (before, a tie left the order; D1 Tamers still does). This is our rule, and the ranking shown
+  right after the battle is already the server's guess. The servers have a hook for the real
+  outcome (`outcome` in the game's entry); for Brave Tamer it is not set, see
+  [The battle](#the-battle-mapped-2026-11-27).
 - **The guess is often wrong for this game** (measured in the game, 2026-11-26, with the one party we
   can build, against a copy of it with the HP, DP, AP and PP caps scaled, four seeds each): the
   challenger won on screen 4 of 4 times against an opponent at ×0.5, ×0.9, ×1 and ×1.5, 3 of 4 at ×2
@@ -131,8 +137,9 @@ and data file.
   challenger with all nine seeds tried, and the server left them one place below the tamer they had
   just beaten (seen on the list that follows the fight). The server says "win" only for a weaker opponent, so
   it agreed at ×0.5 and ×0.9 and in 6 of the other 24 battles. One Digimon against its copy is a
-  narrow test; agreeing in general needs the cartridge's battle code run on the server. Not done,
-  and the rule is unchanged.
+  narrow test; agreeing in general needs the cartridge's battle code run on the server. The
+  2026-11-27 mapping explains the numbers (the challenger wins unless its whole party is knocked
+  out within 10 rounds) and why the port was not written (the battle needs tables from the ROM).
 - **でんどうバトル (hall of fame)**: the game searches with a blank key (`FD`×8). Bandai's hall of fame
   (a weekly-ranking hall of fame, per the archived admin pages) is lost. Ours enshrines each week's
   ladder leader (ISO weeks) and also lists the current leader, newest first, at most 8. The battle
@@ -150,6 +157,94 @@ and data file.
   game's own warning before deleting says so ("トウロクされている ハンドルネームは シヨウできなくなります。").
 - Login news is our own message ("ワンダーゲート サーバー ふっかつ！ ランキングバトル かいさいちゅう。").
 - Unknown IDs: rankbtl/idupld answer `01`; idbtl answers "not found".
+
+## The battle (mapped 2026-11-27)
+
+The owner chose to run the game's own battle on the server, so that the ladder follows the screen.
+Mapping the battle showed that it cannot be rebuilt from its code and the two uploaded parties alone:
+it looks up each Digimon's technique, and more, in tables in the ROM, and this repo holds no ROM
+data. The port was therefore not written, `outcome` is not set for Brave Tamer, and the ladder still
+moves by the strength guess (with ties now going to the challenger). What was found is kept here.
+
+### Who wins
+
+Read in the code (`C2BE:67A8`, state `0x9F`, and `C2BE:665E`, state `0x9A`) and seen in the game:
+
+- LOSE (`DS:0920` = 1) only when every Digimon of the challenger is knocked out.
+- WIN (`DS:0920` = 0) when every Digimon of the opponent is knocked out, and also **when the tenth
+  round ends with the challenger still standing**. The round limit `DS:2DA6` is 10 for battle type 4
+  and 99 for the others; at the limit the other types set LOSE, type 4 sets WIN.
+
+So the challenger wins unless the opponent knocks the whole party out within 10 rounds. Seen: a
+challenger cut to HP 300 against the standard test party ended round 10 with 21 HP against 495 and
+the screen said WIN; with another seed it was knocked out in round 10 and the screen said LOSE. This
+is why equal parties gave WIN with every seed tried, and why an opponent with two to four times
+the stats still lost half the time or more.
+
+### How it runs
+
+| What | Where |
+|---|---|
+| Mode `0x19`: init, update, exit | `C2BE:1ED4`, `C2BE:25F0`, `C2BE:6C93`. Update is one switch over about 160 states (`DS:2DB0`); most are animation and text |
+| Result screen, mode `0x1A` | update `C2BE:688C` |
+| Units | `DS:285E`, `0x6E` bytes each, the challenger's first: +0 side, +1 state (1 fighting), +3 Digimon number, +0x10 stat block (HP, DP, AP, PP as current/maximum words from +0x10; SP at +0x20), +0x2E form count, +0x2F form numbers, +0x39 items, +0x63 status bits |
+| Set-up for type 4 | `C2BE:06DF` (from `07CC`): the seed byte at `0000:3400` goes to `DS:2CF0` as a word; `C2BE:0644` builds each side from its three records (`0000:3401` + 55 × n, own party first; flag `FF` ends a side) with `C9F7:4319`; `DDC1:0B67` sets each stat to cap × percent / 100 plus item bonuses, HP at most 9999, the other three at most 999 |
+| Random numbers | `C2BE:000E`: x = 5x + `0x3573` (16 bits), result = (x × n) >> 16 for a range n. 28 call sites: 22 in `C9F7`, 6 in `C2BE`. The other generator (`C2BE:004A`, `DS:2CF2`) is used by the field code only |
+| A round | State 4 goes to `0x1E` for type 4: `C9F7:4BB5` picks an action for every Digimon of **both** sides (control bytes `DS:2832`/`2833` are both 1; no input is read): attack, a technique it has the DP for, or guard, with rolls of the random generator. Actions are in `DS:2BB4` (10 bytes per unit: kind, target class, target, technique word at +8). `C2BE:0B93` orders the actors by SP, highest first; at equal SP the challenger's Digimon comes first. States `0x30`/`0x34` resolve each action in turn: `C9F7:011A` (attack: hit roll, damage), `C9F7:54E1` (technique), then `C9F7:08D0` applies a technique's effect and `C9F7:03DE` counts the timed statuses down at the end of the round |
+| Damage | `C9F7:000E`: attacker's AP (+ the technique's power) − target's PP, plus a quarter for each point the attacker's items have against the target's class (`C000:0C55`), × 8 / 10 if the target guards, at least 1. An attack hits with (100 − target's SP) %, a technique with its own hit rate minus one of the target's stats |
+
+Seen in the game: battle type 4, both control bytes 1 and limit 10 in memory during a WonderGate
+battle; plain attacks doing AP − PP (13 with the test party) and techniques AP + power − PP; the
+same parties and seed giving the same battle twice, turn by turn.
+
+### What it reads
+
+- From the server's reply: the seed byte and the opponent's three records. From the cartridge:
+  its own three records, built the same way as the upload. Every field of a record is used except
+  the nickname.
+- Nothing else of the save was found to matter: with the saved party wiped from memory
+  (`0xC932`.. and the count `0xCA7A`) after the reply, three battles ran turn by turn as before.
+- From the ROM, for the fight itself (sizes and contents described, nothing copied):
+
+| Table | Where | Size | What it holds | Used by |
+|---|---|---|---|---|
+| Techniques, one per Digimon number | `923B:000A` (ROM `0x3923BA`) | 310 × 25 bytes | target kind (+0), effect class (+1; 24 classes, about half the entries are plain damage), DP cost (+2, word), power (+7, word), hit rate (+9), and amounts and chances for the effects (+4, +6, +0xA to +0x18) | the action choice (cost, class, target kind), the hit and damage rolls, the effect code. `C9F7` reads it in 115 places, `C2BE` in 25; nearly every byte is used |
+| Digimon | `9030:0008` (ROM `0x390308`) | 310 × 27 bytes | per Digimon: an attribute (+7), base stats (+0xC on), other bytes | `DDC1:0531`, which rebuilds a stat block from a Digimon number and is called from the effect code (`C9F7:1E87`); also the form change of a played battle, rewards and display |
+| Item bonuses | `9984:0000` (ROM `0x399840`) | 52 bytes | stat bonus by item class and grade, for items `0x00`–`0x2F` | `C000:0864`, when the stats are built |
+| Target map | `A04E:0004` | one byte per target kind (13 used) | target kind → the action's target class | the action choice |
+| One byte | linear `0xA23A2` | 1 byte | read as the effect class of "technique `FFFF`", which is how a plain attack is stored | `C9F7:4FBE` |
+
+  Watching the ROM during three battles (one Digimon each, and three against three with other
+  Digimon numbers poked in) showed the technique table read at +0 to +4 and +7 to +0x13, the target
+  map and the one byte; the Digimon table was read only by display code in those, and the item
+  table not at all (the test party's items are numbered above `0x2F`). The other uses are from the
+  code.
+- None of these values are in what a cartridge uploads: a record carries the form numbers, not
+  the techniques behind them.
+
+Seen in the game that the tables decide the result: with the same stats and seed, changing only
+the opponent's form numbers changed WIN to LOSE or back in five of six seeds tried.
+
+### Size of a port
+
+The fight is spread over `C2BE` (29.6 KB; the logic is a minority of its 160 states) and
+`C9F7:0000`–`5870` (about 22 KB: hit and damage rolls, 12 KB of effect code for the 24 effect
+classes, the action choice, end-of-round effects), with stat helpers in `DDC1` and `C000`. It is
+unoptimised compiled C; an estimate is 1,500 lines per language, plus the two tables above (about
+16 KB) from somewhere.
+
+### Checking a port against the game
+
+A battle can be run headless from a save state, without a server: play `braverankbtl` up to the VS
+screen of the second tamer's ranking battle (mode `0x30`, both replies in) and save a state. For each
+battle load it, write the seed to RAM `0x3400`, the challenger's three records to `0x3401` and the
+opponent's to `0x34A6` (an unused slot is `FF` and 54 zero bytes), press A, run until the mode
+(`0xCA82`) leaves `0x19` and read `0xC920`. A fight of one Digimon each that goes ten rounds is about
+10,000 frames (two seconds); three against three took 23,000 to 26,000. Units are at RAM `0xE85E`
+(HP at +0x10), the state at `0xEDB0`, the round at `0xE858`; a breakpoint at `C2BE:000E` gives every
+random call with its caller. The game accepted records with other Digimon and form numbers poked in
+(tried: 0, 2, 3, 5, 6, 7, 8, `0x60`, `0xB3`, `0xFD`, `0x107`, `0x12C`, `0x131`, `0x135`), stats up to
+the limits, and parties of one, two and three on either side.
 
 ## Reaching it
 
@@ -228,12 +323,37 @@ On an empty server `braverank` and `bravehall` end on "データがみつかり�
 are taken, but there is no list to show. After a battle reply the opponent's profile is at RAM
 `0xF7E4`; the last ranking is at `0xFAA0` (count `0xFB70`), the last search list at `0xF91C`.
 
+## Checked in the game (2026-11-27)
+
+Headless; the party poke is the shortcut as before.
+
+- Tie rule: `braverankbtl` (two tamers with the same party; the second challenges the first) ends
+  with WIN on screen (RAM `0xC920` = `00`) and the list that follows shows the challenger first
+  (`0xFAA0` = its ID). With the server's old rule the same replay left the challenger second
+  (`0xFAA0` = the first tamer's ID); with every reply corrupted the checks fail.
+- A battle the challenger loses: with ライバル leading at the game's stat limits
+  (`emu/seeds/braveranklose/`), the ranking battle ends with LOSE on screen (`0xC920` = `01`) and the
+  list unchanged (ライバル first, the player second). Here screen and guess agree because the
+  parties are far apart; the guess is still a guess.
+- Python server and Worker gave the same replies to a made-up series of 25 requests (four signups,
+  eight ranking battles with ties, wins and losses by the guess, the lists after each, the hall
+  search and battle), the ranking battles' seeds included.
+- After the tie rule, `bravehallbtl`'s tamer leads the ladder when it opens the hall, so the hall
+  holds only its own entry and the replay's hall battle is against its own party.
+- The battle findings above (who wins, the 10 rounds, the tables' effect, the save not mattering)
+  were each seen in battles run from a save state with records written into memory; that is the
+  game's own battle code, but not a party the game built itself.
+
 ## Open
 
 - Normal-play route: play (or obtain a real save) to the first partner, then replace the party poke.
 - The hall of fame is our rule (weekly leaders); Bandai's list and exact rule are lost.
 - The ladder moves by a strength guess that the game's own WIN/LOSE often contradicts (see
-  [Our server](#our-server)). Matching it needs the battle code (mode `0x19`) run on the server.
-- Not checked: a party of two or three Digimon, or any Digimon but the debug party's (the WonderGate
-  needs a save we do not have); the week change on the Worker (the same rule, read from the code);
-  anything on a real console.
+  [Our server](#our-server)). Running the real battle on the server needs the ROM's technique and
+  Digimon tables ([The battle](#the-battle-mapped-2026-11-27)); how to supply them, or whether to keep
+  the guess, is the owner's decision. Until then the guess is wrong whenever the stronger opponent
+  fails to knock the challenger out in 10 rounds, and whenever a weaker one manages to.
+- Not checked: any party the game built itself other than the debug party's one Digimon (the
+  WonderGate needs a save we do not have; parties of two and three and other Digimon were only
+  written into memory); the week change on the Worker (the same rule, read from the code); the
+  parts of the battle map marked as read from the code; anything on a real console.

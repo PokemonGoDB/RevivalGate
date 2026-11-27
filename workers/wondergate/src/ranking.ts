@@ -11,6 +11,11 @@ import { writeAllowed } from './limits';
 
 export const CONTENT_TYPE = 'application/x-swan-ranking-response';
 
+/** What a handler may remember between the requests of one connection, as swan_ranking.CONNECTION: HttpSession
+ *  sets a fresh object for its connection (one tunnel, one Conn), and it goes when the Conn does. Without one
+ *  (handle() called directly) nothing is remembered. */
+export const CONNECTION = new WeakMap<Conn, Record<string, unknown>>();
+
 // ---------- sort orders ----------
 
 /** How a course ranks: by the score as a number, higher or lower first, or as text, lowest first
@@ -72,6 +77,9 @@ interface Cfg {
   rowFmt?: Record<number, (row: number, digits: string) => string>;
   /** true when the name is sent unencoded and may hold '&' (see parseForm) */
   rawOwner?: boolean;
+  /** true when each course is uploaded under its own name, in separate requests of one connection: a course's
+   *  rank is looked up under the name its score came with */
+  ownerPerCourse?: boolean;
 }
 
 /** D's Garage reads your rank as four characters but keeps only the last two: tens * 10 + units, each character -
@@ -138,10 +146,12 @@ const finalLapLower: Record<number, Order> = Object.fromEntries(Array.from({ len
 export const GAMES: Record<string, Cfg> = {
   // Raku Jongg: your rank and the row count go as one character each (see oneChar; parser ROM 0xBF248, 0xBF359).
   // The game announces ranks 1-20 only, so anything lower goes as 21. Names are the game's own character codes,
-  // sent as they are: its digit 6 is '&' and its small ァ is '|' (rawOwner, barFree).
+  // sent as they are: its digit 6 is '&' and its small ァ is '|' (rawOwner, barFree). The save has a name per
+  // mode and each of the three POSTs carries its own; the table request is the third, so the first two names
+  // are remembered for the connection (ownerPerCourse).
   rakujang: {
     courses: 3, maxRows: 20, nameMax: 8, header: false, countMax: 99, score: { default: [1, 6] }, group: 1,
-    rankFmt: oneChar(21), countFmt: oneChar(20), rawOwner: true, nameFmt: barFree('\x85')
+    rankFmt: oneChar(21), countFmt: oneChar(20), rawOwner: true, nameFmt: barFree('\x85'), ownerPerCourse: true
   },
   // GunPey EX: a score row has room for 6 characters (a 7th zeroes it), and the game shows the first six digits of
   // that 7-digit field with "00" after them, the way it shows your own score. So the uploaded number goes back as
@@ -314,16 +324,24 @@ export class Store {
   }
 
   /** Standings and pages for some courses (after any pending writes). A page starts at place `start`, or
-   * with `relative`, `start` places ahead of the player (Final Lap "+1" = the rival just ahead). */
+   * with `relative`, `start` places ahead of the player (Final Lap "+1" = the rival just ahead). `owner` is
+   * the player's name, or each course's (Raku Jongg). */
   async tables(
-    game: string, player: string, owner: string, courses: number[], order: (course: number) => Order,
-    start: number, count: number, relative = false
+    game: string, player: string, owner: string | ((course: number) => string), courses: number[],
+    order: (course: number) => Order, start: number, count: number, relative = false
   ): Promise<Map<number, Table>> {
     const db = this.conn.env.WG_DB;
-    const byOrder = new Map<Order, number[]>();
-    for (const c of courses) byOrder.set(order(c), [...(byOrder.get(order(c)) ?? []), c]);
-    const queries = [...byOrder].map(([o, cs]) =>
-      db.prepare(tableSql(o, cs.length)).bind(game, player, owner, relative ? 1 : 0, start, count, ...cs)
+    const ownerOf = typeof owner === 'string' ? () => owner : owner;
+    // One query for the courses that share a sort order and a name.
+    const groups = new Map<string, { order: Order; owner: string; courses: number[] }>();
+    for (const c of courses) {
+      const key = `${order(c)} ${ownerOf(c)}`;
+      const g = groups.get(key) ?? { order: order(c), owner: ownerOf(c), courses: [] };
+      g.courses.push(c);
+      groups.set(key, g);
+    }
+    const queries = [...groups.values()].map((g) =>
+      db.prepare(tableSql(g.order, g.courses.length)).bind(game, player, g.owner, relative ? 1 : 0, start, count, ...g.courses)
     );
     const results = await db.batch<Record<string, unknown>>([...this.writes, ...queries]);
     this.writes = [];
@@ -387,6 +405,11 @@ export async function handle(conn: Conn, game: string, raw: Uint8Array): Promise
   // Final Lap: group 2 asks for courses 17-32 (lap times; 1-16 are total times).
   const courseBase = cfg.coursesPerGroup ? (group - 1) * cfg.courses : 0;
   const order = (course: number) => rankKey(cfg, course);
+  // The name each course was uploaded under on this connection (ownerPerCourse): that is the player's row
+  // there. A course not uploaded on this connection is looked up under this request's name.
+  const state: Record<string, unknown> = (cfg.ownerPerCourse && CONNECTION.get(conn)) || {};
+  const named = (state.owners ??= new Map<string, string>()) as Map<string, string>;
+  const ownerOf = (course: number) => named.get(`${course} ${game} ${player}`) ?? owner;
 
   // Only the game's own groups and courses are stored, so an upload can't start new tables. Others are
   // still answered as the game expects.
@@ -415,8 +438,10 @@ export async function handle(conn: Conn, game: string, raw: Uint8Array): Promise
       if (cfg.tablePerGroup) {
         if (groups.includes(course)) add(tableOf(course), { course: 1, score, extra });
         else note.push('(no such table, not stored)');
-      } else if (course > courseBase && course <= courseBase + cfg.courses) add(tableKey, { course, score, extra });
-      else note.push('(no such course, not stored)');
+      } else if (course > courseBase && course <= courseBase + cfg.courses) {
+        add(tableKey, { course, score, extra });
+        named.set(`${course} ${game} ${player}`, owner);
+      } else note.push('(no such course, not stored)');
     }
   }
   if (entries.size) {
@@ -473,14 +498,15 @@ export async function handle(conn: Conn, game: string, raw: Uint8Array): Promise
   }
   const courses = Array.from({ length: cfg.courses }, (_, i) => courseBase + i + 1);
   const tables = near !== null
-    ? await store.tables(tableKey, player, owner, courses, order, 1, start, false)
-    : await store.tables(tableKey, player, owner, courses, order, start, count, relative);
+    ? await store.tables(tableKey, player, ownerOf, courses, order, 1, start, false)
+    : await store.tables(tableKey, player, ownerOf, courses, order, start, count, relative);
   for (const course of courses) {
     const t = tables.get(course)!;
+    if (ownerOf(course) !== owner) note.push(`course ${course} as ${ownerOf(course)}`);
     let ranked = t.page.map((r, i) => [t.first + i, r] as const);
     if (near !== null && t.rank > start) {
       const lo = Math.max(start + 1, t.rank - near);
-      const more = (await store.tables(tableKey, player, owner, [course], order, lo, t.rank - lo + 1, false)).get(course)!;
+      const more = (await store.tables(tableKey, player, ownerOf, [course], order, lo, t.rank - lo + 1, false)).get(course)!;
       ranked = ranked.concat(more.page.map((r, i) => [lo + i, r] as const));
     }
     const ew = (width.get(course) ?? [6, 2])[1];

@@ -1,0 +1,19 @@
+POST http://rakujang.wgg.channel.or.jp/swan-ranking HTTP/1.1
+Host: rakujang.wgg.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 36
+
+*=FFFFFF&owner=345&score=1|001000|02POST http://rakujang.wgg.channel.or.jp/swan-ranking HTTP/1.1
+Host: rakujang.wgg.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 37
+
+*=FFFFFF&owner=89:;&score=2|000200|04POST http://rakujang.wgg.channel.or.jp/swan-ranking HTTP/1.1
+Host: rakujang.wgg.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 57
+
+*=FFFFFF&owner=BCD&score=3|000200|04&list=rakujang|1|20

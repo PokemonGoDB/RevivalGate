@@ -6,7 +6,10 @@ import { PORTAL_GAME, PORTAL_MISSING, PORTAL_PAGES } from './encoded';
 import type { Reply } from './http';
 
 export function handle(path: string): Reply {
-  if (path === '/game.wg') {
+  // Host + path keys are the cart's factory bookmarks (http.ts): every path on Docomo's old host gets our
+  // one page for it, and the download page served for http://game/ links to the game on that host.
+  if (path.startsWith('www.nttdocomo.co.jp/')) path = 'www.nttdocomo.co.jp/';
+  if (path === '/game.wg' || path === 'game/game.wg') {
     // A game for the cart's GAME menu: the whole body, sent as CONTENT-TYPE: APPLICATION/WONDERGATE
     // (compared exactly, cart ROM 0x11584). The body is raw 8086 code, run at 1000:0010 (our Snake).
     const body = bytesOf(PORTAL_GAME);

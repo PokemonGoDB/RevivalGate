@@ -40,7 +40,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TRANSLATION = pathlib.Path(os.environ.get("WSCLI_HOME", ROOT / "local/wscli"))  # the headless emulator host (README.md)
-CORE = ROOT / "local/wscli-core-wg/mednafen_wswan_libretro.dylib"
+# WG_CORE_DIR picks another build of the core (emu/build_core.sh takes the same variable), e.g. to try an
+# adapter change without replacing the build other runs are using.
+CORE = pathlib.Path(os.environ.get("WG_CORE_DIR") or ROOT / "local/wscli-core-wg") / "mednafen_wswan_libretro.dylib"
 # ROM folder: WS_ROMS, else /Volumes/Games if mounted, else ~/Documents (same layout).
 ROMS = pathlib.Path(os.environ.get("WS_ROMS") or next(
     (p for p in ("/Volumes/Games", pathlib.Path.home() / "Documents") if pathlib.Path(p, "WonderSwan Color").is_dir()),

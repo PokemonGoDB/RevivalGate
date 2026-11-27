@@ -1,7 +1,8 @@
 /*
  * wgcore in the browser: the page supplies serial out, name lookup, and sockets (WebSocket tunnels to the
  * RevivalGate server) as imports. sock_recv may wait for the server's reply: the build runs Binaryen's
- * asyncify over it, so that import can return a Promise and the page awaits it.
+ * asyncify over it, so that import can return a Promise and the page awaits it. wait_ms is the game's own
+ * receive wait (wg.h, sock_recv_wait), 0 when the game sent none: the page then uses its short wait.
  */
 #include "vendor/wg.h"
 
@@ -13,7 +14,7 @@ IMPORT(js_resolve) int js_resolve(const char *name, uint8_t *ip);
 IMPORT(js_sock_open) int js_sock_open(void);
 IMPORT(js_sock_connect) int js_sock_connect(int h, const uint8_t *ip, int port);
 IMPORT(js_sock_send) int js_sock_send(int h, const uint8_t *buf, size_t len);
-IMPORT(js_sock_recv) int js_sock_recv(int h, uint8_t *buf, size_t len);
+IMPORT(js_sock_recv) int js_sock_recv(int h, uint8_t *buf, size_t len, uint32_t wait_ms);
 IMPORT(js_sock_shutdown) void js_sock_shutdown(int h, int how);
 IMPORT(js_sock_close) void js_sock_close(int h);
 IMPORT(js_log) void js_log(const char *line);
@@ -23,12 +24,13 @@ static int o_resolve(void *c, const char *name, uint8_t ip[4]) { (void)c; return
 static int o_open(void *c) { (void)c; return js_sock_open(); }
 static int o_connect(void *c, int h, const uint8_t ip[4], uint16_t port) { (void)c; return js_sock_connect(h, ip, port); }
 static int o_send(void *c, int h, const uint8_t *buf, size_t len) { (void)c; return js_sock_send(h, buf, len); }
-static int o_recv(void *c, int h, uint8_t *buf, size_t len) { (void)c; return js_sock_recv(h, buf, len); }
+static int o_recv(void *c, int h, uint8_t *buf, size_t len) { (void)c; return js_sock_recv(h, buf, len, 0); }
+static int o_recv_wait(void *c, int h, uint8_t *buf, size_t len, uint32_t ms) { (void)c; return js_sock_recv(h, buf, len, ms); }
 static void o_shutdown(void *c, int h, int how) { (void)c; js_sock_shutdown(h, how); }
 static void o_close(void *c, int h) { (void)c; js_sock_close(h); }
 static void o_log(void *c, const char *line) { (void)c; js_log(line); }
 
-static const wg_ops ops = { 0, o_tx, o_resolve, o_open, o_connect, o_send, o_recv, o_shutdown, o_close, o_log };
+static const wg_ops ops = { 0, o_tx, o_resolve, o_open, o_connect, o_send, o_recv, o_shutdown, o_close, o_log, o_recv_wait };
 static wg_config cfg;
 static wg g;
 

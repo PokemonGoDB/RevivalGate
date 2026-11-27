@@ -70,7 +70,7 @@ Unknown commands and oversized payloads get **no reply** (games time out).
 | `11:06` | Shutdown socket | 2 bytes, `sock, 01`. Games need a reply but ignore its contents |
 | `11:07` | Close socket | Must reply 2 bytes, `sock, 01` (`sock, 00` if the socket wasn't open). Rainbow Islands aborts with error 999 on a 1-byte reply; Sennou checks the second byte for 1 |
 | `11:08` | Resolve hostname | `01`, canonical name, NUL, IPv4. **This is where we redirect** |
-| `11:0D` | Recv one line (up to `\n`) | `00, count, data…`. `FF` = closed |
+| `11:0D` | Recv one line (up to `\n`) | Params: sock, max length, and in most games a third byte: how long to wait for the first byte, in seconds as far as the games' own timeouts show (5 to 30 by game). Reply `sock, count, data…`; count 0 = nothing arrived in that time; `FF` = closed |
 | `11:0E` | Send bytes | `00, count` |
 | `11:0F` | Recv block | as `0D` |
 
@@ -144,7 +144,7 @@ server is needed for basic browsing.
 | Digimon Adventure 02: D1 Tamers | ✅* shortcut-verified | ✅* Signup; ✅* Ranking battles and ladder; ✅* ID upload, search and battle | [digimon-d1-tamers.md](wondergate/digimon-d1-tamers.md) |
 | Dark Eyes: Battle Gate | ✅* shortcut-verified | ✅ Online battles (login, prepaid service, matchmaking, turn relay); ✅* Mercenaries (register, list, hire, withdraw, fees); ✅ World info (market, world events, busiest and quietest battle regions, place names) | [dark-eyes.md](wondergate/dark-eyes.md) |
 | Star Hearts | ✅* shortcut-verified | ✅ Gate Bazaar membership; ✅* Visitor counters | [star-hearts.md](wondergate/star-hearts.md) |
-| Wonder Classic | 🔁 substitute | ✅ Member card registration; ✅ Member card change; 🔁 Net Tour (bulletin, round download, play, entry); ✅ Rankings, your rank, previous winners, past rankings; ✅ New product (monthly item); ✅* Super shot upload and VTR; ✅* 耳寄り情報 (inside tips) and the ネオキャラ (Neo characters) unlock; 🔁 Tour replays | [wonder-classic.md](wondergate/wonder-classic.md) |
+| Wonder Classic | 🔁 substitute | ✅ Member card registration; ✅ Member card change; 🔁 Net Tour (bulletin, round download, play, entry); 🔁 Monthly final; ✅ Rankings, your rank, previous winners, past rankings; ✅ New product (monthly item); ✅* Super shot upload and VTR; ✅* 耳寄り情報 (inside tips) and the ネオキャラ (Neo characters) unlock; 🔁 Tour replays | [wonder-classic.md](wondergate/wonder-classic.md) |
 | Lode Runner for WonderSwan | ❌ missing | ❌ Extra stage downloads (50+); ✅ Stage sharing over the link cable (our addition) | [lode-runner.md](wondergate/lode-runner.md) |
 | Digimon Tamers: Brave Tamer | ✅* shortcut-verified | ✅* Signup; ✅* Ranking battles and ladder; ✅* Hall-of-fame battles (でんどうバトル) | [brave-tamer.md](wondergate/brave-tamer.md) |
 | Uchuu Senkan Yamato | ✅* shortcut-verified | ✅* National ranking (Yamato index, top 50); ✅* Crew logs (all 30, in the ROM) | [yamato.md](wondergate/yamato.md) |

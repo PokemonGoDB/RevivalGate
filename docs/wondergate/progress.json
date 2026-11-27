@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-26",
+  "updated": "2026-11-27",
   "statuses": {
     "working": "Rebuilt on our servers and verified headless on the real game code by normal play.",
     "shortcut-verified": "Rebuilt and working, but verified by setting game state directly (RAM/SRAM pokes or a patched ROM copy) instead of reaching it by normal play.",
@@ -18,14 +18,16 @@
         "mwgbrowser",
         "mwgmail",
         "mwggame",
-        "mwgsend"
+        "mwgsend",
+        "mwgbmgame",
+        "mwgbmdocomo"
       ],
       "features": [
         {
           "name": "Web browser (portal pages)",
           "status": "working",
           "verified": "in-game",
-          "notes": "Home page, game list, news, a mail guide, and the game download page."
+          "notes": "Home page, game list, news, a mail guide, and the game download page. The cartridge's three factory bookmarks open pages of ours that say whose they are."
         },
         {
           "name": "Mail auto-setup",
@@ -48,8 +50,7 @@
       "open": [
         "Label homebrew clearly: on the portal, on its own page, and on the game's title screen",
         "More homebrew games",
-        "Ask owners to check their cartridge's save memory (SRAM bank 7) for a game downloaded in 2001–2004",
-        "The ゲームダウンロード factory bookmark gets no answer (the game download page in our portal works)"
+        "Ask owners to check their cartridge's save memory (SRAM bank 7) for a game downloaded in 2001–2004"
       ]
     },
     {
@@ -58,18 +59,18 @@
       "doc": "docs/wondergate/raku-jongg.md",
       "replays": [
         "rakujang",
-        "rakuname"
+        "rakuname",
+        "rakumodes"
       ],
       "features": [
         {
           "name": "Rankings (ranks, tables, names, stages)",
           "status": "working",
-          "verified": "in-game"
+          "verified": "in-game",
+          "notes": "A player with a different name in each of the three modes is ranked in all three."
         }
       ],
-      "open": [
-        "A player who uses a different name in each of the three modes is shown as unranked in two of them: the game's table request only carries one name"
-      ]
+      "open": []
     },
     {
       "id": "gunpeyex",
@@ -391,7 +392,8 @@
       "title": "Terrors 2",
       "doc": "docs/wondergate/ring-terrors.md",
       "replays": [
-        "terrors2"
+        "terrors2",
+        "terrors2slow"
       ],
       "features": [
         {
@@ -402,7 +404,7 @@
         }
       ],
       "open": [
-        "The clock is set wrong when the server takes more than two seconds to answer: our adapter doesn't yet wait as long as the game asks"
+        "MesenCE and the Bluetooth module still give up after 2 seconds until they pick up the new adapter code"
       ]
     },
     {
@@ -468,7 +470,7 @@
         }
       ],
       "open": [
-        "Run the game's own battle on the server: the cartridge never reports who won, so the ladder follows our strength guess, which can disagree with the battle shown on screen"
+        "The ladder still follows a strength guess (it matched the screen in 45 of 56 test battles): the cartridge never reports who won, and working the battle out on the server needs the game's technique table, which this project doesn't copy from the ROM"
       ]
     },
     {
@@ -485,7 +487,7 @@
           "name": "Online battles (login, prepaid service, matchmaking, turn relay)",
           "status": "working",
           "verified": "in-game",
-          "notes": "A battle between two cartridges was tested by hand. Our automatic test plays one side."
+          "notes": "Battles between two cartridges were played to the end in the emulator. The record screen shows each opponent's real wins and losses, and a search for an opponent lasts three minutes."
         },
         {
           "name": "Mercenaries (register, list, hire, withdraw, fees)",
@@ -502,7 +504,6 @@
       ],
       "open": [
         "Watch random-battle earnings change in the busiest or quietest region",
-        "Show each opponent's real win and loss record (we send 0 and 0)",
         "If a turn's reply is lost on the way, the cartridge sends the turn again and the two sides fall out of step: turns carry no number, so the server can't tell a repeat from a new turn"
       ]
     },
@@ -538,7 +539,10 @@
         "wcshot",
         "wccard",
         "wcvtr0",
-        "wcentry"
+        "wcentry",
+        "wcfinal",
+        "wcfinalno",
+        "wcwinners"
       ],
       "features": [
         {
@@ -555,7 +559,13 @@
           "name": "Net Tour (bulletin, round download, play, entry)",
           "status": "substitute",
           "verified": "in-game",
-          "notes": "Works from start to finish, but no original round survives, and there's no evidence one was ever held. We serve a test round on built-in course 0, with weather and wind that change every Monday and harder conditions in the final week, as the manual describes. Monthly themed tours are planned."
+          "notes": "Works from start to finish, but no original round survives, and there's no evidence one was ever held. We serve a test round on built-in course 0, with weather and wind that change every Monday."
+        },
+        {
+          "name": "Monthly final",
+          "status": "substitute",
+          "verified": "in-game",
+          "notes": "The rules are ours, not Bandai's, whose are lost: the final runs from the fourth Monday to the end of the month, the 100 best qualifying scores may enter, and it is ranked by the total of two rounds."
         },
         {
           "name": "Rankings, your rank, previous winners, past rankings",
@@ -589,10 +599,10 @@
         }
       ],
       "open": [
-        "A monthly tour as the manual describes: a final for the top 100 after three qualifying weeks (the weekly weather and wind already change)",
         "A new product every week, adding up as the original did",
         "Replays for each round we make",
-        "Keep every round and replay we make, and list past tours on this site"
+        "Keep every round and replay we make, and list past tours on this site",
+        "After downloading a new week's round, a cartridge that already entered this month only accepts a score of even par or better: the cartridge forgets its last entered score but not that it entered"
       ]
     },
     {
@@ -634,7 +644,8 @@
         "braverankbtl",
         "bravehallbtl",
         "braverank8",
-        "bravehallweek"
+        "bravehallweek",
+        "braveranklose"
       ],
       "features": [
         {
@@ -658,7 +669,7 @@
       ],
       "open": [
         "Reach the WonderGate with a real first partner (play or an owner's save) instead of the party poke",
-        "Run the game's own battle on the server: the cartridge never reports who won, so the ladder follows our strength guess, which can disagree with the battle shown on screen"
+        "The ladder still follows a strength guess, with ties going to the challenger: the cartridge never reports who won, and working the battle out on the server needs the game's technique and Digimon tables, which this project doesn't copy from the ROM"
       ]
     },
     {

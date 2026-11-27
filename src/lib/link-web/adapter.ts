@@ -3,11 +3,13 @@
 // same tunnel protocol as Swan Revival Link (link/lib.mjs). Runs in the browser and, for tests, in Node 22.
 //
 // wgcore expects a receive to wait up to ~2 s for the server's reply (Wonder Classic and the mail cart fail
-// without it). The wasm is built with Binaryen's asyncify, so js_sock_recv returns a Promise and the call
-// into wgcore pauses and resumes around it.
+// without it), or as long as the game asked when its receive command carries a wait of its own (5 to 30 s).
+// The wasm is built with Binaryen's asyncify, so js_sock_recv returns a Promise and the call into wgcore
+// pauses and resumes around it; the page stays responsive however long the wait.
 
 export const DEFAULT_SERVER = 'wss://wg.swanrevival.com/tunnel';
 const RECV_NODATA = -2;
+const RECV_DROPPED = -3; // the console sent again before the game's own wait ran out: wgcore sends no answer
 
 export type AdapterEvent =
   | { type: 'log'; line: string }
@@ -24,7 +26,8 @@ export interface AdapterOptions {
   /** A device token (account link); scores post under the account's name. */
   token?: string | null;
   onEvent?: (e: AdapterEvent) => void;
-  /** How long a receive waits for the server before answering "nothing yet" (wgcore's platforms use 2 s). */
+  /** How long a receive waits for the server before answering "nothing yet" when the game sent no wait of
+   *  its own (wgcore's platforms use 2 s). */
   recvWaitMs?: number;
   /** Line silence after which a half-received frame is dropped. */
   frameGapMs?: number;
@@ -48,6 +51,8 @@ interface Sock {
   pending: Array<Uint8Array | string>;
   data: Uint8Array[];
   wake: (() => void) | null;
+  /** Set while a receive waits out the game's own wait: ends it without an answer. */
+  drop: (() => void) | null;
 }
 
 type Exports = {
@@ -74,6 +79,7 @@ export async function createAdapter(opts: AdapterOptions): Promise<Adapter> {
 
   let ex!: Exports;
   let asyncData = 0;
+  let waitingBytes = 0; // console bytes fed but not yet given to wgcore
   let pendingResult: Promise<number> | null = null;
   let resumeValue = 0;
   const socks = new Map<number, Sock>();
@@ -167,7 +173,7 @@ export async function createAdapter(opts: AdapterOptions): Promise<Adapter> {
       },
       js_sock_open() {
         const h = nextHandle++;
-        socks.set(h, { port: 0, ws: null, open: false, closed: false, pending: [], data: [], wake: null });
+        socks.set(h, { port: 0, ws: null, open: false, closed: false, pending: [], data: [], wake: null, drop: null });
         return h;
       },
       js_sock_connect(h: number, _ip: number, port: number) {
@@ -185,20 +191,25 @@ export async function createAdapter(opts: AdapterOptions): Promise<Adapter> {
         send(s, mem().slice(buf, buf + len));
         return len;
       },
-      js_sock_recv(h: number, buf: number, len: number): number | Promise<number> {
+      js_sock_recv(h: number, buf: number, len: number, gameWaitMs = 0): number | Promise<number> {
         const s = socks.get(h);
         if (!s) return 0;
         if (s.data.length) return take(s, buf, len);
         if (s.closed) return 0;
+        // The console already sent more: it isn't waiting for this receive (see feed).
+        if (gameWaitMs && waitingBytes > 0) return RECV_DROPPED;
         // Nothing yet: wait for data, the close, or the timeout (then "nothing yet", and the game asks again).
+        // gameWaitMs is the game's own wait, from its receive command; without one, the short wait.
         return new Promise<number>((resolve) => {
-          const done = () => {
+          const done = (dropped = false) => {
             clearTimeout(timer);
             s.wake = null;
-            resolve(s.data.length ? take(s, buf, len) : s.closed ? 0 : RECV_NODATA);
+            s.drop = null;
+            resolve(s.data.length ? take(s, buf, len) : s.closed ? 0 : dropped ? RECV_DROPPED : RECV_NODATA);
           };
-          const timer = setTimeout(done, recvWaitMs);
+          const timer = setTimeout(done, gameWaitMs || recvWaitMs);
           s.wake = done;
+          if (gameWaitMs) s.drop = () => done(true);
         });
       },
       js_sock_shutdown(h: number, how: number) {
@@ -222,12 +233,12 @@ export async function createAdapter(opts: AdapterOptions): Promise<Adapter> {
 
   // Asyncify: a Promise from js_sock_recv unwinds wgcore back to us; when it settles, rewind and resume.
   const recvRaw = imports.env.js_sock_recv;
-  imports.env.js_sock_recv = (h: number, buf: number, len: number) => {
+  imports.env.js_sock_recv = (h: number, buf: number, len: number, gameWaitMs = 0) => {
     if (ex.asyncify_get_state() === REWINDING) {
       ex.asyncify_stop_rewind();
       return resumeValue;
     }
-    const r = recvRaw(h, buf, len);
+    const r = recvRaw(h, buf, len, gameWaitMs);
     if (typeof r === 'number') return r;
     pendingResult = r;
     ex.asyncify_start_unwind(asyncData);
@@ -261,7 +272,13 @@ export async function createAdapter(opts: AdapterOptions): Promise<Adapter> {
   return {
     feed(bytes) {
       if (closed) return;
-      for (const b of bytes) enqueue(() => call(ex.lw_rx, b));
+      // The console is sending again. If a receive is still waiting out the game's own wait, the game has
+      // given up on it: end it with no answer (a late one would be read as the next command's).
+      for (const s of socks.values()) s.drop?.();
+      for (const b of bytes) {
+        waitingBytes++;
+        enqueue(() => (waitingBytes--, call(ex.lw_rx, b)));
+      }
       if (gapTimer) clearTimeout(gapTimer);
       gapTimer = setTimeout(() => {
         enqueue(async () => {

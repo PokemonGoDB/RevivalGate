@@ -88,7 +88,6 @@ function normalize(buf, what = '', path = '') {
   s = s.replace(/(X-SWAN-MTCH-SEED: )\d+/g, '$1<SEED>'); // Dark Eyes match seed
   s = s.replace(/(X-SWAN-SRVC-ID: )[0-9A-F]{8}/g, '$1<ID>'); // Dark Eyes: the customer ID issued at login
   s = s.replace(/((?:PPP|MAIL)PASSWORD:)[0-9a-f]{8}/g, '$1<PASSWORD>'); // mail auto-setup
-  s = s.replace(/info=([01]{6})[01]{7}\r\n/g, 'info=$1<CARDS>\r\n'); // Pocket Fighter: the Worker rotates the 7 card flags daily
   if (s.includes('BFEVREC=')) s = s.replace(/\b20\d{6}\b/g, '<DATE>');
   if (what === 'nclassic') s = s.replace(/20\d{12}/g, '<TIME>'); // Wonder Classic: the server clock, yyyymmddhhmmss
   const split = s.indexOf('\r\n\r\n') >= 0 ? s.indexOf('\r\n\r\n') + 4 : s.indexOf('\n\n') + 2;

@@ -47,7 +47,9 @@ export function route(conn: Conn, rawHost: string, path: string, headers: Record
   if (host === 'link.swanrevival.com' && path === '/loderunner/stage') return (body) => loderunner.handle(conn, headers, body);
   if (host === 'start.mopera.ne.jp') return () => mail.start(conn, path);
   if (host === 'www.mopera.ne.jp') return () => portal.handle(path);
-  if (host === 'wg.channel.or.jp') return () => portal.handle(host + path); // the cart's "WonderSwan Web for WG" factory bookmark
+  // The cart's three factory bookmarks: "WonderSwan Web for WG", ゲームダウンロード (http://game/) and
+  // ドコモホームページ(テキスト). The adapter sends the last two names here too (wgcore).
+  if (host === 'wg.channel.or.jp' || host === 'game' || host === 'www.nttdocomo.co.jp') return () => portal.handle(host + path);
   if (host === 's_hearts.wgg.channel.or.jp' && path === '/cgi-bin/starhearts.cgi') return () => starhearts.handle(conn, query);
   if (host === 'battleg1.dark-eyes.com' && path.startsWith('/cgi-bin/dark/')) return (body) => darkeyes.handle(conn, path, headers, body);
   if ((host === 'digi4.wgg.channel.or.jp' && path.startsWith('/cgi-bin/dm4')) || (host === 'digi_b.wgg.channel.or.jp' && path.startsWith('/cgi-bin/dmB'))) {
@@ -102,7 +104,10 @@ export class HttpSession {
     private conn: Conn,
     private send: (bytes: Uint8Array) => void,
     private close: () => void
-  ) {}
+  ) {
+    // What handlers remember for this connection only (Raku Jongg's name per mode), as wgserver.http_conn.
+    ranking.CONNECTION.set(conn, {});
+  }
 
   async feed(data: Uint8Array) {
     if (this.done) return;

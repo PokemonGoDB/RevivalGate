@@ -8,6 +8,7 @@ wgcore-host: main.c $(CORE) $(HDRS)
 
 test: wgcore-host
 	python3 -I ../tools/test_core.py ./wgcore-host
+	python3 -I test_wait.py ./wgcore-host
 	python3 -I test_tunnel.py ./wgcore-host
 
 clean:

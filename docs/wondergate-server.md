@@ -61,18 +61,9 @@ node scripts/wg-mesen-e2e.mjs        # the games themselves, headless in MesenCE
 
 ## Deliberate differences from the Python server
 
-- Bandai's charge service (`/service/charge/nph-*`) hangs up after each reply, as the original
-  non-parsed-header CGIs did. Games such as Rainbow Islands and Gundam Vol. 1 read until the
-  connection closes; the Python server keeps it open until its 60-second idle timeout.
-- Clock values are Japan time; the Python server uses the host's local time (`wg-conformance.mjs` runs
-  it with `TZ=Asia/Tokyo` so dates in binary replies compare).
 - Dark Eyes ties a mercenary upload to the player who last sent world info from the same address.
   The Python server keeps that in memory by client address; the Worker stores a hash of the relay's
   address in D1 and forgets it after a day.
-- Pocket Fighter's digital cards rotate: the Worker's `info=` reply turns on one of the 7 card flags
-  per day (Japan time, Monday the first), so a player collects all 7 by downloading on each day of the
-  week. The Python server turns all 7 on, as the six extras still are on both. (`wg-conformance.mjs`
-  masks the card flags.)
 - MobileWonderGate mail passwords are hashed with PBKDF2-SHA256 at 100,000 rounds, the most Workers
   allow; the Python server uses 200,000. Both store the rounds with each hash.
 - The Python server's reverse-engineering probe hooks (environment variables such as `NC_MARK`,

@@ -6,14 +6,16 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
-/* How long a receive waits before answering "0 bytes, still open". A real
- * adapter answers at once; Wonder Classic polls an idle socket and treats
+/* How long a receive waits before answering "0 bytes, still open" when the
+ * game sent no wait of its own (wg.h, sock_recv_wait), and for the rest of a
+ * line once it has started. Wonder Classic polls an idle socket and treats
  * "closed" as a dead server. Long enough for our local server to reply. */
 #define RECV_TIMEOUT_S 2
 
@@ -111,6 +113,37 @@ static int p_sock_recv(void *ctx, int s, uint8_t *buf, size_t len)
   return (int)n;
 }
 
+/* A receive that carries the game's own wait (wg.h): until data, the close,
+ * wait_ms, or the console sending again. */
+static int p_sock_recv_wait(void *ctx, int s, uint8_t *buf, size_t len, uint32_t wait_ms)
+{
+  wg_posix *p = ctx;
+  struct pollfd f[2] = { { s, POLLIN, 0 }, { p->console_fd ? *p->console_fd : -1, POLLIN, 0 } };
+  struct timespec t0, t;
+
+  clock_gettime(CLOCK_MONOTONIC, &t0);
+  for (;;) {
+    long left;
+    int r;
+
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    left = (long)wait_ms - ((long)(t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000);
+    r = poll(f, 2, left > 0 ? (int)left : 0);
+    if (r < 0 && errno == EINTR)
+      continue;
+    if (r < 0)
+      return -1;
+    if (f[0].revents)
+      return p_sock_recv(ctx, s, buf, len);  /* data, or the close */
+    if (f[1].revents & (POLLIN | POLLHUP | POLLERR))
+      return WG_RECV_DROPPED;
+    if (f[1].revents)
+      f[1].fd = -1;                          /* not something poll can watch: wait without it */
+    else if (left <= 0)
+      return WG_RECV_NODATA;
+  }
+}
+
 static void p_sock_shutdown(void *ctx, int s, int how)
 {
   (void)ctx;
@@ -135,6 +168,7 @@ void wg_posix_ops(wg_ops *ops, wg_posix *p)
   ops->sock_shutdown = p_sock_shutdown;
   ops->sock_close = p_sock_close;
   ops->log = p_log;
+  ops->sock_recv_wait = p_sock_recv_wait;
 }
 
 int wg_posix_load_config(wg_config *cfg, const char *path)
