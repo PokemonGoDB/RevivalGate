@@ -16,6 +16,7 @@ APOP), so data/mail.json keeps only a salted PBKDF2 hash of each password.
 See docs/wondergate/mobilewondergate.md.
 """
 import asyncio
+import datetime
 import email.utils
 import hashlib
 import hmac
@@ -79,7 +80,10 @@ def deliver(db, user, raw):
 
 def notice(db, user, subject, body):
     """A mail from postmaster to one of our accounts (ISO-2022-JP, as the MAILER reads)."""
-    deliver(db, user, NOTICE.format(domain=DOMAIN, user=user, date=email.utils.formatdate(localtime=True),
+    # The date is written in Japan time whatever zone this host is in, as the cart writes its own
+    # mail and as the Worker does (the cart shows any zone converted to Japan time).
+    jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
+    deliver(db, user, NOTICE.format(domain=DOMAIN, user=user, date=email.utils.format_datetime(jst),
                                     subject=jis(subject), body=body.encode("iso2022_jp").decode("latin-1")))
 
 
@@ -129,7 +133,6 @@ def autoconf(path):
 async def daytime_conn(reader, writer):
     """Daytime (port 13 on ns1/ns2.channel.or.jp): the MAILER asks for the time
     before sending and writes the Date header as JST (+0900)."""
-    import datetime
     jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
     writer.write(jst.strftime("%a %b %d %H:%M:%S %Y\r\n").encode())
     await writer.drain()

@@ -1,5 +1,6 @@
 // accsess.cgi check-ins: Ring Infinity and Terrors 2 (same developer, same library). A port of access.py.
-// Both read 7 lines (status and headers) and then the body, and wait for the server to hang up.
+// Both read exactly 7 lines (status and headers) and then one block; Terrors 2 takes its clock from
+// that 8th read, so the header count must not change. Lines and body stay under 127 bytes.
 import { bytesOf, jst } from './bytes';
 import type { Reply } from './http';
 

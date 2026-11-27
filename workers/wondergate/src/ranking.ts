@@ -66,12 +66,54 @@ interface Cfg {
   countFmt?: (n: number) => string;
   /** your rank -> the rank in the course line (default: decimal) */
   rankFmt?: (n: number) => string;
+  /** cap on the rank that starts a row (default: none) */
+  rowRankMax?: number;
+  /** course -> f(row number from 0, score digits) -> digits sent in that row */
+  rowFmt?: Record<number, (row: number, digits: string) => string>;
+  /** true when the name is sent unencoded and may hold '&' (see parseForm) */
+  rawOwner?: boolean;
 }
+
+/** D's Garage reads your rank as four characters but keeps only the last two: tens * 10 + units, each character -
+ *  '0' (ROM 0x42EC4: every MUL clears DX, where the sum so far was), so "0123" shows as 23位. The tens go as one
+ *  character instead, '0' + rank / 10, which reaches 2079. A '|' there would end the field, so 760-769 go as 75
+ *  tens and 10-19 units. Past 2079 the rank goes as 0000, which the game shows as ランク外 (unranked). */
+function tanetoriRank(n: number): string {
+  if (n > 2079) return '0000';
+  let tens = Math.floor(n / 10);
+  let units = n % 10;
+  if (tens === 0x4c) [tens, units] = [tens - 1, units + 10];
+  return '00' + String.fromCharCode(0x30 + tens, 0x30 + units);
+}
+
+/** Raku Jongg's small ァ is character 0x7C, '|', which ends a row's name field: the rest of the name is read as
+ *  the stage and every later row of that table shifts (parser ROM 0xBF50E). It goes back as `standIn`, the
+ *  full-size ア (0x85). */
+const barFree = (standIn: string) => (owner: string) => owner.replace(/\|/g, standIn);
 
 /** A number as one character, '0' + n. Raku Jongg's and Yamato's parsers read a lone character as char - '0'
  *  whatever it is, but lose the units of a two-digit number ("15" reads as 10: mov ax,10 / mul / add ax,dx, and
  *  MUL has cleared DX). Numbers past `limit` go as `limit`. */
 const oneChar = (limit: number) => (n: number) => String.fromCharCode(0x30 + Math.min(n, limit));
+
+/** Undo Sennou Millennium's own form-encoding of a name (ROM 0xCE413: a space goes out as '+', a plus as '%2b',
+ *  nothing else is changed) and cut it to the game's width. The game shows a row's name as it comes, so an echoed
+ *  'TARO++++' would show the plus signs. */
+const formDecode = (width: number) => (owner: string) => owner.replace(/\+/g, ' ').replace(/%2b/g, '+').slice(0, width);
+
+/** Tare Panda Puzzle rows: SSS 00 TTT ss = stage, two unused, 99 - minutes, 60 - seconds. The game works the time
+ *  out for the first row only: its row loop then jumps into the next course's loop (ROM 0x9CA3F), which keeps the
+ *  digits as they came, so a 3:20 in row 2 or 3 shows as 96:40. Those rows go out with the time already worked
+ *  out, the way the game does it for row 1 (ROM 0x9C9CA: when the seconds come to 0 the minute goes up by one).
+ *  Digits the game never uploads go back unchanged. Only that board reads these rows. */
+function tarepangPuzzle(row: number, score: string): string {
+  if (row === 0 || score.length !== 10) return score;
+  let minutes = 99 - int(score.slice(5, 8));
+  const seconds = 60 - int(score.slice(8));
+  if (seconds === 0) minutes += 1;
+  if (minutes < 0 || minutes > 99 || seconds < 0 || seconds > 59) return score;
+  return `${score.slice(0, 5)}0${String(minutes).padStart(2, '0')}${String(seconds).padStart(2, '0')}`;
+}
 
 /** Form-decode '+' to spaces and pad to a fixed width (D's Garage shows names). */
 const formName = (width: number) => (owner: string) => owner.replace(/\+/g, ' ').slice(0, width).padEnd(width);
@@ -95,30 +137,43 @@ const finalLapLower: Record<number, Order> = Object.fromEntries(Array.from({ len
 
 export const GAMES: Record<string, Cfg> = {
   // Raku Jongg: your rank and the row count go as one character each (see oneChar; parser ROM 0xBF248, 0xBF359).
-  // The game announces ranks 1-20 only, so anything lower goes as 21.
+  // The game announces ranks 1-20 only, so anything lower goes as 21. Names are the game's own character codes,
+  // sent as they are: its digit 6 is '&' and its small ァ is '|' (rawOwner, barFree).
   rakujang: {
     courses: 3, maxRows: 20, nameMax: 8, header: false, countMax: 99, score: { default: [1, 6] }, group: 1,
-    rankFmt: oneChar(21), countFmt: oneChar(20)
+    rankFmt: oneChar(21), countFmt: oneChar(20), rawOwner: true, nameFmt: barFree('\x85')
   },
+  // GunPey EX: a score row has room for 6 characters (a 7th zeroes it), and the game shows the first six digits of
+  // that 7-digit field with "00" after them, the way it shows your own score. So the uploaded number goes back as
+  // it came, in 6 digits: 0001234560 is 12345600 points on both lines. 10,000,000 points or more can't be sent
+  // and show as 09999900.
   gunpeyex: {
     courses: 5, maxRows: 9, nameMax: 16, header: true, countMax: 9999,
-    score: { default: [10, 6], 3: [1, 8] }, group: 1, replyFmt: { 3: gunpeyPuzzle }
+    score: { default: [1, 6], 3: [1, 8] }, group: 1, replyFmt: { 3: gunpeyPuzzle }
   },
-  heaven: { courses: 1, maxRows: 5, nameMax: 8, header: false, countMax: 99, score: { default: [1, 6] }, group: 1, rankKey: { 1: 'low' } },
+  // Another Heaven: names are the console owner name, up to 16 characters; your rank shows as 4 digits (10000
+  // would show 0000).
+  heaven: { courses: 1, maxRows: 5, nameMax: 16, header: false, countMax: 9999, score: { default: [1, 6] }, group: 1, rankKey: { 1: 'low' } },
+  // D's Garage 21: Tane o Maku Tori. Your rank is exactly 4 characters (see tanetoriRank); one row per course
+  // with a fixed 16-byte name (docs/wondergate/ds-garage.md).
   tanetori: {
     courses: 4, maxRows: 1, nameMax: 16, header: true, countMax: 9999, score: { default: [1, 10] }, group: 1,
-    courseFmt: (v) => `course=${v.g}|${v.n}|${v.entrants}|${v.top}|${v.mine}|${String(v.rank).padStart(4, '0')}`,
-    nameFmt: formName(16), emptyName: 'NO RANKING DATA.'
+    rankFmt: tanetoriRank, nameFmt: formName(16), emptyName: 'NO RANKING DATA.'
   },
   // Sennou Millennium: rows start with a space and carry their own rank, so its fixed
   // "ranking|10|+16" gets the top 10, then the places just ahead of the player down to their own
-  // row, trimmed to fit its 895-byte receive buffer (docs/wondergate/sennou.md).
+  // row, trimmed to fit its 895-byte receive buffer (docs/wondergate/sennou.md). The name arrives
+  // form-encoded (16 characters, up to 48 bytes) and goes back decoded. Entrants and ranks are 32-bit and
+  // show as 8 digits.
   'sen-know': {
-    courses: 1, maxRows: 10, nameMax: 16, header: () => [`date=${dt('YmdHM')}`], countMax: 9999,
-    score: { default: [1, 8] }, group: 1, rowPrefix: ' ', maxBody: 740
+    courses: 1, maxRows: 10, nameMax: 48, header: () => [`date=${dt('YmdHM')}`], countMax: 99999999,
+    score: { default: [1, 8] }, group: 1, rowPrefix: ' ', maxBody: 740, nameFmt: formDecode(16)
   },
+  // Final Lap 2000: the game keeps entrants and your rank in one byte each (rank 256 shows as 0), so both stop
+  // at 255. A row's rank is copied as 3 characters; a 4th overruns the game's memory and it hangs (parser ROM
+  // 0x4AF37), so rows stop at 999 (docs/wondergate/final-lap.md).
   'final-lap': {
-    courses: 16, maxRows: 9, nameMax: 3, header: () => [`date=${dt('Ymd')}`], countMax: 9999,
+    courses: 16, maxRows: 9, nameMax: 3, header: () => [`date=${dt('Ymd')}`], countMax: 255, rowRankMax: 999,
     score: { default: [1, 5] }, group: 1, rankKey: finalLapLower, coursesPerGroup: true, groups: [1, 2]
   },
   // Pocket Fighter: tables 1 score, 2 total points, 3-14 each fighter's points (docs/wondergate/pocket-fighter.md).
@@ -127,8 +182,12 @@ export const GAMES: Record<string, Cfg> = {
     coursesOnUpload: true, tablePerGroup: true, content: pocketfContent, groups: Array.from({ length: 14 }, (_, i) => i + 1)
   },
   // Tare Panda no GunPey: fixed 10-char score fields, echoed as uploaded. Puzzle times are stored as
-  // complements too (row display ROM 0x9C9CA), so higher is better there as well.
-  tarepang: { courses: 4, maxRows: 9, nameMax: 16, header: true, countMax: 9999, score: { default: [1, 10] }, group: 1 },
+  // complements too (row display ROM 0x9C9CA), so higher is better there as well; rows 2 and 3 of that
+  // board need the time itself (see tarepangPuzzle).
+  tarepang: {
+    courses: 4, maxRows: 9, nameMax: 16, header: true, countMax: 9999, score: { default: [1, 10] }, group: 1,
+    rowFmt: { 3: tarepangPuzzle }
+  },
   // Uchuu Senkan Yamato: ヤマト指数 (0-65535), top 50. The game reads only date= (which also sets how
   // many crew logs it shows) and the rows; its row-count parser drops a second digit, so the count
   // goes as one character, '0' + n (docs/wondergate/yamato.md).
@@ -282,12 +341,15 @@ export class Store {
 
 // ---------- request ----------
 
-/** Split a form body without URL-decoding (names are echoed back byte-exact). Keys can repeat. */
-export function parseForm(body: string): Array<[string, string]> {
+/** Split a form body without URL-decoding (names are echoed back byte-exact). Keys can repeat. With rawOwner the
+ * name may hold '&' and '=' (Raku Jongg's 6 and さ): it runs up to the score field that always follows it. */
+export function parseForm(body: string, rawOwner = false): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   for (const part of strip(body, '\r\n\0').split('&')) {
     const i = part.indexOf('=');
-    if (i >= 0) out.push([part.slice(0, i), strip(part.slice(i + 1), '\r\n\0')]);
+    const last = out[out.length - 1];
+    if (rawOwner && last?.[0] === 'owner' && !part.startsWith('score=')) last[1] += '&' + strip(part, '\r\n\0');
+    else if (i >= 0) out.push([part.slice(0, i), strip(part.slice(i + 1), '\r\n\0')]);
   }
   return out;
 }
@@ -307,7 +369,7 @@ function offensive(cfg: Cfg, owner: string): boolean {
 
 export async function handle(conn: Conn, game: string, raw: Uint8Array): Promise<Reply> {
   const cfg = GAMES[game];
-  const fields = parseForm(latin1(raw));
+  const fields = parseForm(latin1(raw), cfg.rawOwner);
   const first: Record<string, string> = {};
   for (const [k, v] of fields) if (!(k in first)) first[k] = v;
   const note: string[] = [];
@@ -376,14 +438,15 @@ export async function handle(conn: Conn, game: string, raw: Uint8Array): Promise
 
   if (!('list' in first)) {
     // Pocket Fighter reads "your rank" from the course line after an upload: the first table it sent
-    // (score, or total points).
+    // (score, or total points). It says ランクイン for 1-50 and ランクがい (outside the best 50) for anything
+    // else, so the rank isn't cut to 50.
     const courses = Array.from({ length: cfg.courses }, (_, i) => i + 1);
     const replyKey = entries.keys().next().value ?? tableKey;
     const tables = await store.tables(replyKey, player, owner, courses, order, 1, 1, false);
     const out = courses.map((course) => {
       const t = tables.get(course)!;
       const top = replyScore(cfg, course, t.page[0]?.score ?? '0');
-      return `course=${cfg.group}|${course}|${Math.min(t.total, 9999)}|${top}|${replyScore(cfg, course, t.mine)}|${Math.min(t.rank, cfg.countMax)}`;
+      return `course=${cfg.group}|${course}|${Math.min(t.total, 9999)}|${top}|${replyScore(cfg, course, t.mine)}|${Math.min(t.rank, 9999)}`;
     });
     return { status: 200, type: CONTENT_TYPE, body: out.join('\r\n') + '\r\n', note: `${owner} ${note.join(', ')}; ranks` };
   }
@@ -430,7 +493,9 @@ export async function handle(conn: Conn, game: string, raw: Uint8Array): Promise
       ? ranked.map(([i, r]) => [i, r.owner, r.score, r.extra] as const)
       : [[near !== null ? 1 : t.first, cfg.emptyName ?? '-', '0', '0'.repeat(ew)] as const];
     const name = cfg.nameFmt ?? ((o: string) => o);
-    const lines = rows.map(([i, o, sc, e]) => `${cfg.rowPrefix ?? ''}${i}|${replyScore(cfg, course, sc)}|${name(o)}|${e}`);
+    const rowFmt = cfg.rowFmt?.[course] ?? ((_row: number, digits: string) => digits);
+    const rowRank = (i: number) => (cfg.rowRankMax ? Math.min(i, cfg.rowRankMax) : i);
+    const lines = rows.map(([i, o, sc, e], k) => `${cfg.rowPrefix ?? ''}${rowRank(i)}|${rowFmt(k, replyScore(cfg, course, sc))}|${name(o)}|${e}`);
     const countLine = (n: number) => `${listname}=${cfg.countFmt ? cfg.countFmt(n) : n}`;
     if (near !== null && cfg.maxBody !== undefined) {
       // Drop the rows farthest ahead of the player until the reply fits the game's receive

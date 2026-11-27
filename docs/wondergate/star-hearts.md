@@ -22,7 +22,7 @@ number (`A000:3534`, `34FE`):
 ```
 body[0..2]  digit count + 4, three hex digits, least significant first
 body[3..4]  ignored
-body[5..]   the number, hex, most significant first (32 bits)
+body[5..]   the number, hex, most significant first (32 bits; read wrongly from 0x10000 up, see below)
 ```
 
 and stores it: N=3 → SRAM `0x500E`, N=4 → `0x5012`, N=5 → `0x5000`. Script commands in bank
@@ -47,4 +47,40 @@ pointed モモ's entry at their scripts.
 
 Each `0003`/`0004` request counts as one visit (`data/starhearts.json`).
 
-Regression: `starhearts` in `emu/replays.txt`.
+## Numbers past 65535, and the display's width (2026-11-26)
+
+The number reader (`A000:350C`) takes one hex digit at a time, but it *rotates* its low word left
+four bits (`rol dx,1` / `rcl bp,1`, four times) where it should shift it. Each digit pushed out of
+the top of the low word goes into the high word and also comes back in at the bottom, where the
+next digit is added to it. Plain hex is therefore read right only below `0x10000`:
+
+- Seen in the game: the body `C000000010000` (65536) was stored as `0x00010001` and the greeter
+  said 65537人目. A member number sent as `031C69E0` (52193760) was stored, and written out for the
+  card, as 52194556.
+- `number()` now works back from the value to the eight digits the game reads as that value (for
+  each digit of the high word, lowest first, it takes away what the rotation adds). Below `0x10000`
+  the reply is the same plain hex as before. A Python copy of the reader agreed with the game on
+  every body tried, and with `number()` on 200,000 random values.
+- Checked in the game with the fix: a seeded count of 65536 reads 65536人目; the member card shows
+  the number the server logged (95721962) and SRAM `0x5000` holds it.
+
+What the dialogue can show, with the counts seeded in `data/starhearts.json` (the counters were
+reached with the scratch ROM described above):
+
+- 0 shows as 0人目 (we never send 0: a visit is counted first). 10, 100, 1000, 10000, 65535, 99999,
+  999999, 9999999, 99999999 and 999999999 all show in full.
+- With a tenth digit the first digit comes out as a stray character (1000000000 showed
+  000000000, 2147483648 showed E47483648), and `FFFFFFFF` is the game's error value ("うまく調べる
+  ことができなんだぞい"). So `number()` stops at 999,999,999.
+- After the card is issued the requests still end in `FFFF`: the member number is never sent back.
+
+The game does not check a reply. With the body replaced by `?` bytes it still hands out a card,
+with whatever its reader makes of the bytes (SRAM `0x5000` = `BF 5D BF 5D`).
+
+Not checked: the gifts on round numbers, and what the original server's numbers looked like.
+
+Regression: `starhearts` in `emu/replays.txt`. The member number is random, so there are no fixed
+bytes to expect at `0x5000`, only "not `BF5DBF5D`", and the replay's last screen is the same either
+way. Far-calling the two counter routines after it gives fixed values on a fresh server
+(`farcall:A000:33DE w600 farcall:A000:343E w600`): today's count `1500E=01000000`, the all-time
+count `15012=02000000`; after corrupted replies they held `3A0A3A0A` and `C9C9C9C9`.

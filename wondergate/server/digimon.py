@@ -26,10 +26,12 @@ docs/wondergate/digimon-d1-tamers.md and docs/wondergate/brave-tamer.md):
              Brave Tamer's でんどうバトル (the hall of fame)
     idbtl    ID[8] target-ID[8] word   -> 0 header profile party 0 0  (1 = not found)
 
-The battle itself is simulated by the cartridge from the two parties, so the
-server only decides who moves up the ladder: the stronger party takes the
-higher rank. IDs are eight digits, which the games' text encoding stores as
-bytes 0-9. Each game keeps its own players and ladder (data/digimon*.json).
+The battle itself is simulated by the cartridge from the two parties and the
+seed, and its result is never sent back (checked in both games), so the server
+decides who moves up the ladder by a guess: the stronger party takes the higher
+rank. The WIN/LOSE on screen can disagree; the docs have the numbers. IDs are
+eight digits, which the games' text encoding stores as bytes 0-9. Each game
+keeps its own players and ladder (data/digimon*.json).
 """
 import json
 import pathlib
@@ -131,23 +133,29 @@ def listing(db, ids):
     return bytes([len(ids)]) + body.ljust(PROFILE * 8, b"\0")
 
 
-def hall_of_fame(db):
+def new_week(db):
     """Brave Tamer's hall of fame (でんどう): each week's ladder leader is enshrined.
-    Bandai's list is lost; ours starts empty and fills week by week. The current
-    leader is shown too, so the list is never empty once someone is ranked.
-    Newest first, at most 8 (the reply's size)."""
+    When a new week starts, whoever leads the ladder goes into the hall for the week
+    that ended. This runs on every Brave Tamer request, before the ladder can change,
+    so the leader is recorded even if nobody opened the hall that week. (Until
+    2026-11-26 it ran only when someone opened the hall, and recorded whoever led at
+    the previous opening.) True if the data changed."""
     week = time.strftime("%G-W%V")
-    hall = db.setdefault("hall", [])            # [{"id", "week"}], oldest first
+    if db.get("leader_week") == week:
+        return False
+    if db["ranking"] and db.get("leader_week"):
+        db.setdefault("hall", []).append({"id": db["ranking"][0], "week": db["leader_week"]})
+    db["leader_week"] = week
+    return True
+
+
+def hall_of_fame(db):
+    """The hall's list. Bandai's is lost; ours starts empty and fills week by week
+    (new_week). The current leader is shown too, so the list is never empty once
+    someone is ranked. Newest first, at most 8 (the reply's size)."""
     ladder = db["ranking"]
-    if ladder and db.get("leader_week") != week:
-        # A new week: last week's standing leader goes into the hall.
-        if db.get("leader") and db["leader"] in db["players"]:
-            hall.append({"id": db["leader"], "week": db.get("leader_week")})
-        db["leader_week"] = week
-    if ladder:
-        db["leader"] = ladder[0]
     ids = [ladder[0]] if ladder else []
-    for h in reversed(hall):
+    for h in reversed(db.get("hall", [])):  # oldest first in the data
         if h["id"] not in ids and db["players"].get(h["id"], {}).get("block"):
             ids.append(h["id"])
     return ids[:8]
@@ -166,6 +174,8 @@ def handle(path, body):
         return 404, "text/plain", b"not found\r\n", f"digimon: unknown game {cgi}"
     name, tag = cgi[3:], "digimon" if game.prefix == "dm4" else f"digimon {game.prefix}"
     db = load(game)
+    if game.prefix == "dmB" and new_week(db):
+        save(game, db)
     players = db["players"]
     pid = hexid(body)
     if name == "signup.cgi" and len(body) >= 9:
@@ -216,7 +226,6 @@ def handle(path, body):
         if game.prefix == "dmB" and key == "fd" * 8:
             # Brave Tamer's でんどうバトル searches with a blank key: the hall of fame.
             hall = hall_of_fame(db)
-            save(game, db)
             return reply(listing(db, hall) if hall else b"\x00", f"{tag} idsrch hall of fame: {len(hall)}")
         if key == "fd" * 8:
             # D1 Tamers' IDバトル searches with a blank key too (E000:381C) and lists what comes

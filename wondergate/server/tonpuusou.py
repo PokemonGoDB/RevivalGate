@@ -36,7 +36,15 @@ import urllib.parse
 DB = pathlib.Path(__file__).resolve().parent.parent / "data" / "tonpuusou.json"
 YAKUMAN_DB = DB.with_name("tonpuusou-yakuman.json")
 START_RATE = 150000
+# What the cart takes back (parser 0xA2C30, range check A000:3866; both tried in the game):
+# R2500 or more is refused ("レートのあたいがいじょうです") at every download, so that ID could
+# never play again; a rate with fewer than three digits isn't read (the cart reads stray RAM
+# in its place); the game count is a 16-bit word.
+RATE_MAX, GAMES_MAX = 249999, 0xFFFF
 KINDS = 15              # yakuman kinds the cart counts and uploads
+# The ranking screen draws a kind's count with three digits and the total's with four, and drops
+# the digits above them (1000 reads as 0, 65535 as 535; seen in the game), so rows stop there.
+SHOWN, SHOWN_TOTAL = 999, 9999
 CONTENT_TYPE = "application/x-swan-ranking-response"
 
 
@@ -50,7 +58,8 @@ def save(players):
 
 
 def digits(v, n):
-    return v.isdigit() and 0 < len(v) <= n
+    # ASCII digits only: str.isdigit() alone also takes bytes like 0xB2 ('²'), which int() refuses
+    return v.isascii() and v.isdigit() and 0 < len(v) <= n
 
 
 def yakuman(body):
@@ -87,7 +96,8 @@ def yakuman(body):
         if not top:
             continue
         out.append(f" BEST3={len(top)}".encode())
-        out += [f" {r}|{min(count(p), 0xFFFF):05d}|".encode() + bytes.fromhex(p["owner"]) + b"|"
+        shown = SHOWN if table else SHOWN_TOTAL
+        out += [f" {r}|{min(count(p), shown):05d}|".encode() + bytes.fromhex(p["owner"]) + b"|"
                 for r, p in enumerate(top, 1)]
     return (200, CONTENT_TYPE, b"".join(line + b"\r\n" for line in out),
             f"tonpuusou yakuman ranking: {note}; {len(out)} lines")
@@ -100,9 +110,10 @@ def handle(path, body):
     pid, pw = form.get("c", ""), form.get("d", "")
     players = load()
     p = players.get(pid)
+    new = p is None
     if not pid:
         return reply(0, None, f"tonpuusou {path}: no ID")
-    if p is None:
+    if new:
         p = players[pid] = {"password": pw, "rate": START_RATE, "games": 0}
     elif p["password"] != pw:
         return reply(0, None, f"tonpuusou {path}: wrong password for {pid}")
@@ -110,10 +121,11 @@ def handle(path, body):
         if not (digits(form.get("e", ""), 6) and digits(form.get("f", ""), 5)):
             return reply(0, None, f"tonpuusou setrate: bad values {form}")
         rate, games, before = int(form["e"]), int(form["f"]), form.get("g", "")
-        if (games, rate) == (p["games"], p["rate"]):
-            # The same result sent again (the reply was lost): nothing to change.
+        if not new and (games, rate) == (p["games"], p["rate"]):
+            # The same result sent again (the reply was lost): nothing to change. (A new ID is
+            # never a resend: it is registered below even when it uploads the starting values.)
             return reply(1, p, f"tonpuusou setrate {pid}: resent, unchanged")
-        if before.isdigit() and int(before) != p["games"]:
+        if before.isascii() and before.isdigit() and int(before) != p["games"]:
             # Computed from an older download (another console played in between, or
             # a reply was lost): keep the result, but never move the count backwards.
             games = max(games, p["games"] + 1)
@@ -129,7 +141,7 @@ def handle(path, body):
 def reply(ok, p, note):
     body = f"c={ok}\r\n"
     if p:
-        body += f"e={p['rate']}\r\nf={p['games']}\r\n"
+        body += f"e={min(p['rate'], RATE_MAX):03d}\r\nf={min(p['games'], GAMES_MAX)}\r\n"
     return 200, "text/plain", body.encode(), note
 
 

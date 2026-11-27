@@ -41,7 +41,49 @@ paths don't use them.
     to `_` with no length check and the score lands on the sixth byte, so we send at most 5
     letters (a 6-letter name runs on into the score's bytes on screen, and two of them hung the
     ranking screen) and at most rank 255.
+  - The score column draws seven digits and drops the ones above: 12345678 showed as 2345678 and
+    10000000 as 0. From nine digits the number reader (`0x176D13`: digits buffered at RAM `0x120`,
+    the sum kept at `0x128`, eight powers of ten in its table) goes wrong altogether: 4294967295
+    showed as 5964233. So a score is sent as at most 9999999; places still go by the stored score.
 - `^MSG` (a message) and `^ERR` (error 601) may also appear.
+
+### Limits checked in the game (2026-11-26, seeded server)
+
+Ranking, each through the `wizrank` route with `data/wizardry.json` seeded:
+
+- **1st to 4th place:** the player's row is starred in place (`* 2ND ALICE 8500 *`, `* 3RD …`), and
+  4th is a fourth row under the top three. From 5th the `⋮`, the place above and the player follow.
+- **Ties:** equal scores keep the order they were registered in, so a new player with the same
+  score ranks below (our choice).
+- **Rank 254, 255, 256 and 300:** shown as `*254TH`, then `*255TH` for the rest, with the row above
+  one less (the real place above is still the name shown).
+- **Scores:** 9999999 is the most the screen shows right (see above); larger ones are sent as 9999999.
+
+Downloads, with replies written by hand on a scratch server:
+
+- **Maps:** flags and sets land as sent (flags `1 1 0 1 0 1 1 1 0 1` gave SRAM `0x40F2` = `EB 02`,
+  sets 0 and 19 were taken). A set of 20 is error 600 and nothing is stored. Ten pairs with every
+  flag 0 is "ついかマップはありませんでした". The parser reads pairs until `#` with no count check and
+  always tests ten flags, so the reply must hold exactly ten pairs, as ours does. A fresh cartridge
+  already holds sets 10–19 at `0x40F4` with no floor enabled.
+- **Shop:** item 2 and item 121 are taken (marks at SRAM `0x42A7 + n`), and so is a list of all 120.
+  Item 1, item 122 and an empty list are error 600, and the stock table is cleared before the list
+  is read, so a refused list leaves the shop empty. Every month of our rotation is twelve numbers
+  inside 2–121; the first (2–13) and last (110–121) were both taken.
+
+Not checked: what Boltac's shop screen lists (it needs a party in town), and the names and scores
+the ending itself sends (the replay writes the URL into RAM).
+
+### What shows that the game took a reply (2026-11-26)
+
+Each checked against a run whose reply bodies were replaced with `?` (the game then shows
+エラーコード 600 データエラー):
+
+- `wizardry`: SRAM `0x40F2` = `FF 03` after the map download (`00 00` otherwise), `expect:140F2=FF03`.
+  The shop's marks depend on the month (November 2026: `0x42CD`–`0x42D8` = `FF`); its message
+  "ざいこリストをダウンロードしました!" is the last screen.
+- `wizrank`: the first slot and the player's slot hold name, score and rank:
+  `expect:1411B=414C4943450087D6120001` and the same at `14147` (zeros otherwise).
 
 ## Ranking registration (end of the game)
 

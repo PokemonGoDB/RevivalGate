@@ -1,0 +1,7 @@
+POST http://tongpuso.wgg.channel.or.jp/swan-ranking HTTP/1.1
+Host: tongpuso.wgg.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 287
+
+*=FFFFFF&owner=A=@B@>@>@>@>@>@>&score=1%7C1%7C&score=2%7C2%7C&score=3%7C3%7C&score=4%7C4%7C&score=5%7C5%7C&score=6%7C6%7C&score=7%7C7%7C&score=8%7C8%7C&score=9%7C9%7C&score=10%7C10%7C&score=11%7C11%7C&score=12%7C12%7C&score=13%7C13%7C&score=14%7C14%7C&score=15%7C15%7C&list=BEST3%7C1%7C3

@@ -39,12 +39,15 @@ const MAX_NAME = 16;
 
 /** One "rank name_score " entry, kept inside the cartridge's slot (parser at ROM 0x176AB0): the name is copied up
  *  to '_' with no length check into 6 bytes, and the score then lands on the sixth, so 5 letters is the most that
- *  shows cleanly (a 6-letter name runs on into the score's bytes; two of them hung the ranking screen). The score
- *  is 32-bit, the rank one byte. */
+ *  shows cleanly (a 6-letter name runs on into the score's bytes; two of them hung the ranking screen). The rank
+ *  is one byte. The screen draws seven digits of a score and drops the ones above (12345678 reads as 2345678),
+ *  and the cartridge's number reader (0x176D13) goes wrong from nine digits, so a larger score is sent as
+ *  SCORE_MAX (tested in the game). */
 const NAME_MAX = 5;
 const RANK_MAX = 255;
+const SCORE_MAX = 9_999_999;
 function entry(rank: number, name: string, score: number): string {
-  return `${rank} ${name.slice(0, NAME_MAX).replace(/_/g, ' ')}_${Math.min(score, 0xffffffff)} `;
+  return `${rank} ${name.slice(0, NAME_MAX).replace(/_/g, ' ')}_${Math.min(score, SCORE_MAX)} `;
 }
 
 async function ranking(conn: Conn, name: string, score: number): Promise<[string, number]> {

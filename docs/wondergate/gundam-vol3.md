@@ -31,3 +31,12 @@ The replay fakes all this with `poke:37=1`, LRU bytes 0–7 = 0, `eeprom:C=0 eep
 Unlock code: page `0x7E`, CS `EC3E` state machine at `EC3E:0B0A` (file `0x7ECEEA`);
 connect = `B400:0071` (dial), state `0x11` picks `rand % 4` and sets SRAM `0x25BA+n` and
 `0x11DC+n`.
+
+## Checked again (2026-11-26)
+
+- No request reaches the server; the game only needs the dial to go through.
+- Proof in the save: SRAM `0x11DC`–`0x11DF` and `0x25BA`–`0x25BD` are all `00` up to
+  「接続しますか？」; after the dial one flag in each is `01`. In the replay it is the third,
+  「セイラの回想」 (`0x11DE`, `0x25BC`), and the game says 「このサブシナリオがダウンロードできたわ。」
+  Answering いいえ dials nothing, returns to the title and leaves all eight `00`.
+- Not verified: a dial that fails, and the other three picks (the choice is random).

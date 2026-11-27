@@ -11,12 +11,13 @@ Every reply must be 200 with an *-RET header whose number is the result code:
 0 = success, anything else is shown to the player as the error. A missing
 header the step needs = error 700. See docs/wondergate/charge.md.
 """
+import datetime
 import json
 import pathlib
 import secrets
-import time
 
 COUNTER = pathlib.Path(__file__).resolve().parent.parent / "data" / "charge-counter.json"
+JST = datetime.timezone(datetime.timedelta(hours=9))
 
 
 def next_customer(service):
@@ -36,8 +37,9 @@ def token80():
 
 
 def now15():
-    """YYYYMMDDhhmmss + one digit (GunPey EX's sample ends in 3; meaning unknown)."""
-    return time.strftime("%Y%m%d%H%M%S") + "0"
+    """YYYYMMDDhhmmss + one digit (GunPey EX's sample ends in 3; meaning unknown).
+    Japan time, whatever zone this machine is in: the Worker sends the same."""
+    return datetime.datetime.now(JST).strftime("%Y%m%d%H%M%S") + "0"
 
 
 CONTENT_PATHS = ("/service/swan-ranking/pocketf",)
@@ -72,4 +74,7 @@ def handle(path, headers, body):
         h = {"X-SWAN-CNTS-RET": "0", "X-SWAN-CNTS-AID": "0000000001"}
     else:
         h = {}
-    return 200, "text/plain", b"", note, h
+    # nph-* ("non-parsed header") CGIs ended the connection when they finished, and games read the
+    # reply until it closes: Rainbow Islands and Gundam Vol. 1 wait for that, Pocket Fighter gives
+    # up after 30 s.
+    return (200, "text/plain", b"", note, h, "hangup") if name.startswith("nph-") else (200, "text/plain", b"", note, h)

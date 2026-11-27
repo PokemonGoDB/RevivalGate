@@ -11,6 +11,9 @@ one auto-played East-round match, upload "R 1496.91 / 1 game", and the next down
 Mode select → ランキング対戦 → pick a parlor → "connect to WonderGate?" はい → enter the
 Tonpuusou (PC) **ID** and **password** on the keypad (END confirms each) → phone number screen
 (保存 → はい) → "connect to the network?" はい. The replay types ID `0000`, password `4444`.
+The keypad takes an ID of up to 8 digits (the letters are drawn but the cursor stays on the
+digits) and a password of up to 12 letters and digits. Checked 2026-11-26: ID `55555555` with
+password `444444ggguuu` reached the server as typed, in both requests.
 
 **Emulator fix needed:** every menu choice plays a voice sample and waits for it to end.
 The voice driver sets the HBlank timer reload to 1 but never sets the timer-enable bit. On
@@ -22,7 +25,7 @@ the game hung on its first menu. `emu/build_core.sh` now patches `gfx.c` to matc
 
 | Request | Body | Reply |
 |---|---|---|
-| `POST /cgi-bin/getrate.cgi` | `c=<ID>&d=<password>` | `c=1\r\ne=<rate×100>\r\nf=<games>\r\n` |
+| `POST /cgi-bin/getrate.cgi` | `c=<ID>&d=<password>` | `c=1\r\ne=<rate×100, three digits or more>\r\nf=<games>\r\n` |
 | `POST /cgi-bin/setrate.cgi` | `c=<ID>&d=<password>&e=<new rate×100>&f=<games>&g=<games − 1>` | `c=1\r\n` (we also echo e/f) |
 
 Parser (segment `A000` = ROM `0xA0000`, at `0x2C30`): `c=` one digit, must be `1` (else
@@ -30,6 +33,25 @@ Parser (segment `A000` = ROM `0xA0000`, at `0x2C30`): `c=` one digit, must be `1
 decimals (≤ 4 integer digits); `f=` ≤ 5 digits. `d=` is never read. The cartridge computes
 the new rate itself. Our server registers an unknown ID on first use with its password,
 starts it at R1500.00, and answers `c=0` to a wrong password.
+
+Limits of what the cartridge takes back, tried in the game with a seeded server (2026-11-26):
+
+- **`e=` needs at least three digits.** With one or two (a rate under R1.00) the parser skips the
+  integer part and then reads the decimals, and the rest of the reply, from stray RAM: `e=0` with
+  `f=0` showed "1500.9, 1 game". We send `e=` zero-padded to three digits (`e=005` shows R0.05).
+- **R2500 or more is refused.** After the download the game checks the integer part against 2500
+  (`A000:3866`) and shows "レートのあたいがいじょうです。" instead of starting. The ID could then never
+  play again, so we send at most `e=249999` (R2499.99 downloads and plays). The stored rate is kept as
+  uploaded. More than four integer digits read as 65535, which is refused the same way.
+- **The game count is a 16-bit word.** `f=65535` shows 65535; `f=99999` reads as 34463. We send at
+  most 65535. After a match at 65535 games the cartridge uploads `f=0&g=65535` (its count wraps),
+  which our server takes as a normal result (`g` matches) and stores 0 games.
+- Seen working: R2499.99 with 65535 games downloaded, one auto-played match, upload
+  `c=55555555&d=444444ggguuu&e=249696&f=0&g=65535`, "レートのこうしんがしゅうりょうしました。 2496.96 / 0".
+
+Not checked in the game: a match that would lift the rate to R2500 or more (whether the cartridge
+caps its own result). From the ROM only (not run): cart EEPROM word `0x1E` is set while a ranked
+match is on, and the boot code (`0x40D6D`) takes 30 off the saved rate when it finds it still set.
 
 **`g=` is the game count the new rate was computed from** (builder ROM `0x4F7EF`: `f=` is the
 word at RAM `0x365`, `g=` is the same word minus 1). It lets the server tell results apart:
@@ -135,6 +157,11 @@ POST http://tongpuso.wgg.channel.or.jp/swan-ranking
   are and echo them.
 - One `score` per yakuman kind `n` = 1–15 the player has made (the counters are 15 words the
   builder reads at `0x6C4`); kinds with no yakuman are left out. `|` is sent as `%7C`.
+- The counters live in the cartridge's 1 kbit EEPROM (there is no SRAM): words `0x0C`–`0x1A`, read
+  into RAM `0x6C4` by the loader at ROM `0x40C62` each time they are needed, which is why writing
+  RAM `0x6C4` did nothing. From the ROM: words 0–7 hold the signature `TONPUSOU`, written on first
+  boot (`0x40B43`; without it the EEPROM is wiped), and words `0x1B`–`0x1D` the last rate. Headless, a
+  cart gets counts with `cartee:18=<15 words, low byte first>` after a first boot, then `reset`.
 
 Reply (parser `0xA1D4D`), read one line at a time (at most 127 bytes with its CRLF) until
 Content-Length is used up:
@@ -154,7 +181,40 @@ Our server (`tonpuusou.py` `yakuman`, data in `data/tonpuusou-yakuman.json`; the
 in its `tonpuusou-yakuman` state) keeps each player's counts (by serial and name; a count only
 goes up), and sends the top three of each kind and of the total. Checked in the game (2026-11-25):
 the cart's request is as above; with four players seeded on the server it showed 天和 7回 / 2回 /
-1回, 地和 1回 and 字一色 1回 in the right places. Not checked: an upload with `score=` fields from a
-cart that has made a yakuman (the test cart had none), and where the game shows table 0.
+1回, 地和 1回 and 字一色 1回 in the right places.
 
-Regression: `tonyakuman` in `emu/replays.txt`.
+Checked in the game on 2026-11-26, with counts written to the cart's EEPROM:
+
+- **Upload.** A cart holding 1–15 of the fifteen kinds sent `&score=1%7C1%7C&score=2%7C2%7C…&score=15%7C15%7C`
+  (Content-Length 287), and its own やくまんかいすうをみる screen showed 役満トータル回数 120回. A count
+  of 65535 goes up as `score=1%7C65535%7C`. The server stored all of them.
+- **All 15 tables**, three rows each, with 16-letter names: 天和, 地和, 字一色, 四暗刻, 緑一色, 小四喜和,
+  大三元, 九蓮宝燈, 清老頭, 国士無双, 四槓子, 九蓮9面待ち, 大四喜和, 国士13面待ち, 四暗刻単騎. Names use
+  the console's owner-name codes plus `0x41` (`A` space, `B`–`K` 0–9, `L`–`e` A–Z).
+- **Ties** keep the order the players were first stored in (our choice), numbered 1, 2, 3.
+- **Counts are drawn with three digits**, and the digits above are dropped: 1000 showed as 0回, 12345
+  as 345回, 65535 as 535回 (the cart's own count screen does the same). So a row's count is sent as
+  at most 999, and the total's as at most 9999 (its screen draws four digits). Places still go by
+  the real counts.
+- **Table 0 (the total) is never shown.** The viewer steps the table number with UP/DOWN and holds
+  it between 1 and 15 (ROM `0x4ED24`: on reaching 0 it is set back to 1). With a read watch on
+  table 0 (RAM `0x1480`, 0x36 bytes) nothing read it while browsing every kind, pressing past both
+  ends, the other buttons, leaving, or on the cart's own count screen. The screen exists: forcing
+  the table number to 0 in RAM draws it under the title 役満トータル回数. We keep sending table 0,
+  because a reply with no line is error 599.
+
+Regression: `tonyakuman` in `emu/replays.txt`. What shows that the game took a reply
+(2026-11-26; each checked against a run whose reply bodies were replaced with `?`):
+
+- `tonpuusou`: RAM `0x355` holds the rate (word, then the hundredths byte) and `0x365` the game
+  count; after them the game sets the three opponents' rates at `0x359`. Fresh server:
+  `355=DC0500`, `365=0000`, `359=04060000280600001C06`. After a corrupted reply the game shows
+  エラーコード 599, `0x365` holds `0100` and `0x359` zeros. `0x355` holds 1500 either way, so it only
+  proves anything with a seeded rate (R1876.54, 321 games: `355=540736`, `365=4101`).
+- `tonyakuman`: the replay ends back on the service menu, which looks the same after an error, and
+  a cart with no yakuman gets no rows. The word at RAM `0x713` is the error code: `0000` after a
+  good reply, `5702` (599) after a corrupted one. To make the reply's content count, give the cart
+  one 天和 (`w300 cartee:18=0100 reset` first), send `score=1%7C1%7C`, and stop on the ranking
+  screen (drop the last `A w300`): tables 0 and 1 then hold the count and the owner,
+  `1480=0100413D4042403E403E403E403E403E403E` and the same at `14B6`. Leaving the screen
+  overwrites that memory.

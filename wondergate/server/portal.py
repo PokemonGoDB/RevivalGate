@@ -63,6 +63,15 @@ PAGES = {
 <a href="/game.wg">スネーク</a><br>
 へびを うごかして えさを<br>たべよう。A:スタート<br>
 START:おわる"""),
+    # The cart's factory bookmark "WonderSwan Web for WG" opens http://wg.channel.or.jp/ (cart ROM
+    # 0x1EAB71). Bandai's page there is lost, so this page of ours says so and links to the portal.
+    # Keyed by host + path, so the route for that host is portal.handle(host + path).
+    "wg.channel.or.jp/": lambda: """<html><head><title>WonderSwan Web</title></head><body>
+<b>WonderSwan Web for WG</b><hr>
+バンダイの ページは<br>のこっていません。<br><br>
+この ページは バンダイの<br>ものではなく、ワンダーゲートを<br>ふっかつさせた ファンが<br>つくりました。<br>
+<hr><a href="http://www.mopera.ne.jp/">ワンダーゲートの ホーム</a>
+</body></html>""",
 }
 
 

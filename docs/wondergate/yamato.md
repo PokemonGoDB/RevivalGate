@@ -138,4 +138,25 @@ upload → "アップロード 終了シマシタ", date 2026.10.14 shown, ラ�
 all 30 available and log 01 shown (replay `yamato`, capture `20261014-114943-560`). Tables of 12
 and 50 rows were checked with extra rows posted straight to the server (not committed).
 
+Checked again 2026-11-26 with rows put straight into a scratch server's table:
+
+- **Full table:** 49 better scores plus ours: all 50 rows show, ranks 001–050, ten pages, ours
+  last. With 60 better scores the list is the top 50 and we are not on it; the game says nothing
+  about your own place (the course line, where entrants and rank are, is never read, so their
+  width does not matter). With 3 lower scores we are 001 and rows 005 on are blank.
+- **Names:** the entry screen offers 43 characters (ROM `0x399F3A`): space, `A`–`Z`, `0`–`9`,
+  `#`, `$`, `+`, `-`, `?`, `.`; DOWN steps forward, UP back (UP from the space wraps to `.`). `#` and `$` are drawn
+  as ♥ and ♪. The name goes out as typed, always 8 characters, spaces and `+` included
+  (`owner=+9.# -?.` after entering `+9.♥ -?.`), and comes back the same. None of the 43 can break
+  the form or a row (`&`, `=` and `|` are not among them). Rows named `A B#$+-?`, eight dots,
+  eight `W`, eight spaces and `Z` + seven spaces all show as stored.
+- **Widths, from the parser:** the score and the name are copied up to the next `|` with no
+  check. A 6th score digit loses the field's end mark and a 9th name character runs into the next
+  record. The game uploads 5 digits (65535 at most; a row of 65535 shows) and 8 characters; we
+  send at most 5 and 8 whatever was uploaded.
+- **Proof that a reply was taken:** cartridge SRAM `0x41D0` holds the first ranking record
+  (`26772`, 0, `NO NAME `, 0 for the replay on a fresh server) and SRAM `0x5D4C` is 1. With the
+  reply body replaced by `?` bytes the record stays blank (spaces), the flag stays 0 and the game
+  sits on "アップロード シテイマス" (the unbounded `DATE=` scan above).
+
 Not verified: a CLEAR file from real play, and real hardware.

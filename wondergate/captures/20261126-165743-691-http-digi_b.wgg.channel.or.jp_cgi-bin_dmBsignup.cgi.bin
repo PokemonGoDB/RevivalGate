@@ -1,0 +1,8 @@
+POST /cgi-bin/dmBsignup.cgi HTTP/1.1
+Host: digi_b.wgg.channel.or.jp
+User-Agent: SWAN/1.0 DIGIMON-0B
+Content-Type: application/x-www-from-urlencoded
+Content-Length: 9
+
+
+ÿÿÿÿÿÿ

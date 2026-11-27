@@ -2,7 +2,8 @@
 
 Status: **online battles work** headless (2026-10-13). Two emulated cartridges log in, take the
 prepaid "service", find each other through matchmaking, exchange parties, load the same map and
-pass turns through our relay. In story mode, the guild (ジュリア) registers characters as mercenaries
+pass turns through our relay. On 2026-11-26 battles were played to their end (a win, a loss, a
+draw), followed by a second battle between the same two cartridges. In story mode, the guild (ジュリア) registers characters as mercenaries
 on the server and hires other players' mercenaries, and every connection syncs the shared market
 prices (世界情勢) and pays mercenary owners their fees. Server: [`server/darkeyes.py`](../../wondergate/server/darkeyes.py).
 
@@ -36,8 +37,8 @@ original nph scripts wrote their replies:
 |---|---|---|
 | `nph-login` | SRVC-ID, REQ-SERIAL | SRVC-RETCD, SRVC-TIME, and **SRVC-ID** for a cart that sent `00000000` (see Customer IDs) |
 | `nph-account` | ACNT-ID, ACNT-SID (`BAN00E01` + ID + card blob), ACNT-CMD | ACNT-RETCD; body = message |
-| `nph-reqmatch` | MTCH-ID, NAME (SJIS, URL-encoded), LVL, PASS, RETRY | MTCH-RETCD 0/1 = keep polling every POLINT s (TIMEOUT s); 9 = error; **2 = matched**: MTCH-ID, NAME, LVL (opponent), SEED, MATCH (side), HOST, PATH (of nph-match), ACOUNT, BCOUNT, COUNT |
-| `nph-match` | MTCH-ID, OID, NAME, CMD + body | cmd 0 post party (RETCD 0; 1 = retry) · cmd 1 fetch the opponent's party (2 + body; 1 = not yet) · cmd 2 post my turn (3) · cmd 3 fetch the opponent's turn (5 + body; 4 = not yet) · cmd 4 the battle is over on this cart (6; anything else but 9 = ask again) |
+| `nph-reqmatch` | MTCH-ID, NAME (SJIS, URL-encoded), LVL, PASS, RETRY | MTCH-RETCD 0/1 = keep polling every POLINT s (TIMEOUT s); 9 = error; **2 = matched**: MTCH-ID, NAME, LVL (opponent), SEED, MATCH (side), HOST, PATH (of nph-match), ACOUNT, BCOUNT (the opponent's wins and losses, see Records), COUNT (stored, never read) |
+| `nph-match` | MTCH-ID, OID, NAME, CMD + body | cmd 0 post party (RETCD 0; 1 = retry) · cmd 1 fetch the opponent's party (2 + body; 1 = not yet) · cmd 2 post my turn (3) · cmd 3 fetch the opponent's turn (5 + body; 4 = not yet) · cmd 4 I won (6; anything else but 9 = ask again) |
 | `nph-upmrcnry` | MCUP-ID, PAY, NAME, CLASS, LVL, EXP, STR, DEX, INT, ATR, EM, RY, SK0-3, IT0-3, HP | MCUP-RETCD, MCUP-MID (8 chars) |
 | `nph-listmrcnry` | MCDL-ID, CLASS (race × class code), LVL | MCDL-RETCD, MCDL-NO n; body n × 49 bytes |
 | `nph-downmrcnry` | MCDN-ID, MID | MCDN-RETCD |
@@ -45,8 +46,15 @@ original nph scripts wrote their replies:
 
 The party is four 90-byte character records, base64-encoded by the cartridge (480 bytes);
 after decoding, `6800:16BA` checks every name byte against the allowed katakana (anti-cheat;
-a mismatch shows LOST). Turns are about 20 bytes each. Battles run in the cartridges; the
-server only relays.
+a mismatch shows LOST). A turn is 20 bytes: 16 characters of base64 (12 bytes) and 4 more
+bytes, NULs or `////`. Battles run in the cartridges; the server only relays.
+
+Every wait is counted in frames by the cart (`5900:36B0`–`3B1A`: one small state machine per
+request): it asks again every POLINT seconds and gives up when TIMEOUT seconds have passed since
+the wait began. Both are read from **every** reply that carries them (`5900:35D6`) and kept as
+frames in 16-bit words (RAM `0x398`, `0x39A`; × 75), so TIMEOUT can be at most 873. Until a reply
+sets them the cart uses 10 and 180 (`5900:3693`). A request whose reply never arrives (or isn't
+the code it expects) is sent again after POLINT, body and all.
 
 ### Customer IDs (お客様ＩＤ)
 
@@ -54,8 +62,13 @@ A new cartridge logs in with `X-SWAN-SRVC-ID: 00000000`. The login reply parser 
 looks for `X-SWAN-SRVC-ID` in the **reply** when SRVC-RETCD is 0, 1 or 2, copies its value up to
 the LF to RAM `0x4759` and SRAM `0x6067`, and saves (`4000:D212`). The value must be 8 characters:
 the copy has no length check and the mercenary's MID starts at `0x6070`. Every later request
-carries it (ACNT-ID, MTCH-ID, MCUP-ID, MCDL-ID, MCDN-ID, WINF-ID). The connect menu's お客様ＩＤ
-(`4000:CFA8`) should show it; that screen wasn't looked at.
+carries it (ACNT-ID, MTCH-ID, MCUP-ID, MCDL-ID, MCDN-ID, WINF-ID).
+
+Seen in the game (2026-11-26): the connect menu (サーバー接続 / プリペイド / 電話番号確認) of a new
+cartridge has no ID line; from the first login on it shows `お客様ＩＤ` followed by the issued ID
+(the same 8 characters as SRAM `0x6067` and the later requests' MTCH-ID). The record screen after
+a battle shows both players' IDs (`ID:` after the name and level). A second connection logs in
+with the stored ID and the reply carries no SRVC-ID.
 
 Until 2026-11-25 we never sent one, so every cartridge stayed `00000000` and a player was known by
 hero name alone: two players with the same hero name could not be matched, and one's mercenary
@@ -67,11 +80,42 @@ rest of the session, SRAM `0x6067` held it afterwards, and two carts with the sa
 
 ### End of a battle (`nph-match` cmd 4)
 
-`5900:3A60` sends CMD 4 from the end-of-battle controller, then waits: RETCD 6 ends it, 9 is an
-error, anything else makes it ask again every POLINT until TIMEOUT. We answer 6 and drop the battle
-once both sides have said so (the other may still be collecting the last turn); a cart with no
-battle on record gets 6 as well. Before 2026-11-25 this was answered 9. From the ROM only: no
-battle has been played to its end against the server since, so the cart's side is unverified.
+Played out with two cartridges on 2026-11-26 (how: see Playing a battle headless):
+
+- **Only the winner sends cmd 4**, once, straight after the last turn; it took RETCD 6, hung up
+  and showed VICTORY. The loser collected the last turn (cmd 3), hung up without another request
+  and showed LOSE. Both then showed item rewards, saved, showed the record screen and went back
+  to the title.
+- **A draw sends nothing.** When the count limit (制限カウント 2000) runs out both carts hang up
+  after the last turn and show DRAW, also with 4 units against 3.
+- A cart whose wait runs out (TIMEOUT), or that is answered 9, hangs up and shows LOST, then the
+  title; no cmd 4. (9 on a cmd 3 poll: LOST within two seconds.)
+
+From the ROM: the end-of-battle controller (`0x35E516`) sends cmd 4 only when the result byte at
+SRAM `0x4A0A` is `0xFD` (this side met the victory condition, `F000:1C94`); `0xFE` (lost, or the
+count ran out) goes straight to the hang-up. `5900:3A60` repeats cmd 4 every POLINT until the
+answer is 6 (9 = error). So cmd 4 is how the original server learned who won: the winner's
+MTCH-ID and the loser's MTCH-OID.
+
+We answer 6. The battle is then over for the winner; the loser's side is kept only while the
+last turn is still waiting to be collected. Before 2026-11-25 cmd 4 was answered 9; until
+2026-11-26 the server waited for a cmd 4 from both sides, which never comes, and kept every
+finished battle (the Worker for ten minutes).
+
+### Records (対戦成績)
+
+The record screen after a battle shows あなたの対戦成績 and 相手の対戦成績: name, LV, ID, WIN, LOSE,
+VP. The opponent's line starts from the matched reply's **ACOUNT (wins) and BCOUNT (losses)**,
+to which the cart adds this battle. Checked in the game with ACOUNT 7 / BCOUNT 3 sent to both
+sides: the winner saw the loser as WIN 7 LOSE 4 VP 3, the loser saw the winner as WIN 8 LOSE 3
+VP 5 (their own lines: WIN 1 LOSE 0 VP 1 and WIN 0 LOSE 1 VP 0, so VP looks like wins minus
+losses, not below 0). COUNT is parsed into RAM `0x447`, but from the ROM nothing uses it: its
+getter (`4000:F9B6`, bank `0x34`) isn't in the function table the others are called through.
+
+We always send 0 / 0, so an opponent's record shows only the battle just played. Keeping real
+records would mean counting cmd 4 per customer ID (wins for MTCH-ID, losses for MTCH-OID); that
+isn't built. Draws and LOST endings report nothing, so the original server can't have counted
+them either.
 
 ## Mercenaries and the world market (story mode)
 
@@ -162,12 +206,71 @@ script pointer set to `0x6C49` (ジュリア's "2. 傭兵の登録と雇用を�
 
 ## Our server
 
-Players are told apart by MTCH-ID and name (carts without a registered customer ID send
-`00000000`). Two pollers with the same MTCH-PASS (empty = random match) are paired. Each side
-gets the same seed, MATCH 0/1, and two queues: parties (cmd 0/1) and turns (cmd 2/3).
+Players are told apart by MTCH-ID and name. Mercenaries, earnings and the market are kept in
+`data/darkeyes.json`; matchmaking and battles are kept in memory (the Worker: one D1 row).
 
-Mercenaries, earnings and the market are kept in `data/darkeyes.json`.
+**Search.** Two pollers with the same MTCH-PASS (empty = random match) are paired; each gets the
+same seed and MATCH 0/1. The search can't be cancelled on the cart (B does nothing): it polls for
+TIMEOUT seconds (we send 60), then says 対戦相手が見つかりません and stops without telling the server.
+A waiting player is forgotten 10 s after their last poll. Because of that silence a pair is
+confirmed in two steps: the player who was waiting is told on their next poll, the newcomer once
+that has happened, and a newcomer whose partner never polls again goes back to waiting after
+10 s. (Until 2026-11-26 the newcomer was told at once. Seen in the game: a cart that started
+searching 3 s after another's search had run out was shown 対戦相手が見つかりました, waited a minute
+for a party and got LOST; when the first cart searched again it was matched with that second
+cart, long gone, received its old party, opened the battle and got LOST too. With the fix both
+carts end with 見つかりません; that run was paced at real speed, since the 10 s are the server's
+clock.) What's left: a newcomer that disappears in the second after it arrives still leaves the
+waiting player with a battle nobody joins.
 
-Regression: `darkeyes` in `emu/replays.txt` (one cart, from boot to matchmaking, then cancel) and
-`demerc` (boot to the guild, register a mercenary).
-A two-cart battle needs two emulators running at once (see the commit that added the relay).
+**Battle.** Each side has two queues: parties (cmd 0/1) and turns (cmd 2/3). A player belongs to
+one battle; when they go back to the search, what their old opponent sends no longer reaches
+them: the old opponent collects anything still queued and is then answered 9 (the cart shows
+LOST at once). (Until 2026-11-26 a late turn from an abandoned battle was delivered into the
+player's next battle. Seen in the game: the player's cart showed the new opponent's first unit
+as done while the new opponent was still choosing its move.)
+
+**Time to think.** Match replies carry TIMEOUT 180, the search's keep 60. The cart whose turn it
+is sends nothing while the player thinks; the other cart polls cmd 3 and shows LOST when TIMEOUT
+runs out, and the thinking player finds out only at their own next wait. With 60 on every reply
+(until 2026-11-26) a player who thought for a minute ended the battle; seen in the game. 180 is
+our choice (the cart's own value before a reply sets one); the original server's is unknown.
+Checked in the game: a turn posted after two minutes went through; a wait that got no turn
+ended in LOST after 120 polls (a 60-second wait is 40).
+
+A battle neither side has polled for 10 minutes is forgotten (a draw, a LOST ending and a loser
+who never comes back leave one behind).
+
+**Known and not fixed: lost replies.** Turns carry no number and consecutive turns can be
+byte-identical (four units defending in a row post the same 20 bytes), so the relay can't tell a
+repeated turn from the next one. Seen in the game with the reply to one cmd 2 thrown away after
+the server had handled it: the cart hung up, dialled again and posted the turn again; the other
+cart received it twice and played it as two units' turns, and the two carts no longer agreed.
+By the same reading (not tried): a lost cmd 3 reply loses the turn and both carts end in LOST,
+and a repeated party (cmd 0) is harmless, because the extra copy is never collected. The
+original server would have had the same problem.
+
+## Playing a battle headless
+
+Two emulators stepped in turn against one server (scratch tooling, not in the repo). Facts that
+make it scriptable:
+
+- With the same SEED and parties the map and start positions were the same every run. The
+  battle's work area is SRAM `0x484E`:
+  count `0x48EC` (word), cursor x, y `0x48F1`/`0x48F2`, unit positions x `0x48F5`+n and y
+  `0x4905`+n (n = 0–7 one side, 8–15 the other; `0x40` = dead), result `0x4A0A`.
+- On the active unit: A opens the menu (UP 移動, LEFT 防御 = defend and end the turn, DOWN 環境,
+  RIGHT 行動); after moving, LEFT is 終了. Move: d-pad RIGHT/LEFT = x±1, DOWN/UP = y±1, A, then a
+  facing, A. Attack: 行動 → 攻撃 → target → preview → A. 環境 → 勝利条件 shows the victory condition
+  (敵を２体以下に減らせ and 制限カウント 2000 on the two maps we looked at).
+- A roster record's HP is the word at +6; with HP 1 poked for all five (both carts) every hit
+  kills, and with SEED 1 (a flat forest map) two units of one side can each reach an enemy in
+  their first turn after the other side has walked two units forward. That battle is over in
+  six turns. Defending every turn on both sides ends in DRAW after about 100 turns.
+
+Regression: `darkeyes` in `emu/replays.txt` (one cart, from boot through the search until it
+runs out) and `demerc` (boot to the guild, register a mercenary). What they leave behind when the
+replies were accepted: `darkeyes`: SRAM `0x6067` holds the ID (zeros if the login failed), RAM
+`0x398` = `4B 00` and `0x39A` = `94 11` (POLINT 1 and TIMEOUT 60 from the search replies; zeros
+if it never got that far); `demerc`: SRAM `0x6070` = `00000001` in ASCII and roster byte `0x519E`
+= `A2` (`82` if the upload failed).

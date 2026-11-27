@@ -49,6 +49,33 @@ function exchange(port, data, ms = 15000) {
   });
 }
 
+/**
+ * A conversation on one connection (Wonder Classic, port 10000): the server speaks first, and each
+ * part is sent once the server has answered the one before and gone quiet. Both servers treat
+ * whatever arrives within half a second as one request, so the parts can't be sent together.
+ */
+function converse(port, parts, quiet = 900, patience = 6000) {
+  return new Promise((res) => {
+    const chunks = [];
+    const left = [...parts];
+    let timer;
+    const done = (timeout) => (clearTimeout(timer), s.destroy(), res({ bytes: Buffer.concat(chunks), timeout }));
+    const next = () => {
+      if (!left.length) return s.end(); // the reply to the last part is in: hang up and let the server close
+      s.write(left.shift());
+      timer = setTimeout(() => done(true), patience); // no answer at all
+    };
+    const s = connect({ port, host: '127.0.0.1', allowHalfOpen: true }, () => (timer = setTimeout(() => done(true), patience)));
+    s.on('data', (d) => {
+      chunks.push(d);
+      clearTimeout(timer);
+      timer = setTimeout(next, quiet);
+    });
+    s.on('close', () => (clearTimeout(timer), res({ bytes: Buffer.concat(chunks), timeout: false })));
+    s.on('error', () => {});
+  });
+}
+
 /** Values that legitimately differ between two runs: clock readings and random numbers. */
 function normalize(buf, what = '', path = '') {
   let s = buf.toString('latin1');
@@ -63,6 +90,7 @@ function normalize(buf, what = '', path = '') {
   s = s.replace(/((?:PPP|MAIL)PASSWORD:)[0-9a-f]{8}/g, '$1<PASSWORD>'); // mail auto-setup
   s = s.replace(/info=([01]{6})[01]{7}\r\n/g, 'info=$1<CARDS>\r\n'); // Pocket Fighter: the Worker rotates the 7 card flags daily
   if (s.includes('BFEVREC=')) s = s.replace(/\b20\d{6}\b/g, '<DATE>');
+  if (what === 'nclassic') s = s.replace(/20\d{12}/g, '<TIME>'); // Wonder Classic: the server clock, yyyymmddhhmmss
   const split = s.indexOf('\r\n\r\n') >= 0 ? s.indexOf('\r\n\r\n') + 4 : s.indexOf('\n\n') + 2;
   const head = s.slice(0, split);
   let body = s.slice(split);
@@ -146,22 +174,32 @@ const index = readFileSync(join(opt.repo, 'captures', 'index.jsonl'), 'utf8')
   .split('\n')
   .filter(Boolean)
   .map((l) => JSON.parse(l))
-  .filter((e) => e.kind === 'http' || e.kind === 'bpl');
+  .filter((e) => e.kind === 'http' || e.kind === 'bpl' || e.kind === 'nclassic');
 const only = opt.only ? new Set(opt.only.split(',')) : null;
 
 const results = { same: 0, differ: [], missing: 0, byHost: {} };
-for (const e of index) {
+for (const [i, e] of index.entries()) {
   const file = join(opt.repo, 'captures', e.file);
   if (!existsSync(file)) {
     results.missing++;
     continue;
   }
-  const what = e.kind === 'bpl' ? 'bpl' : `${(e.host || '(no host)').split(':')[0]}${e.path ?? ''}`.split('?')[0];
+  const what = e.kind === 'nclassic' ? 'nclassic' : e.kind === 'bpl' ? 'bpl' : `${(e.host || '(no host)').split(':')[0]}${e.path ?? ''}`.split('?')[0];
   if (only && ![...only].some((o) => what.includes(o))) continue;
   const data = readFileSync(file);
   const port = e.kind === 'bpl' ? 5555 : String(e.host).endsWith(':10000') ? 10000 : 80;
-  const a = await exchange(PY[port], data);
-  const b = await exchange(WK[port], data);
+  let a, b;
+  if (e.kind === 'nclassic') {
+    // Wonder Classic records one file per message; the messages of one connection are replayed together.
+    const same = (o) => o?.kind === 'nclassic' && o.session === e.session && o.conn === e.conn;
+    if (same(index[i - 1])) continue;
+    const parts = index.slice(i).filter((o, j) => same(o) && index.slice(i, i + j).every(same)).map((o) => readFileSync(join(opt.repo, 'captures', o.file)));
+    a = await converse(PY[port], parts);
+    b = await converse(WK[port], parts);
+  } else {
+    a = await exchange(PY[port], data);
+    b = await exchange(WK[port], data);
+  }
   const na = normalize(a.bytes, what, e.path ?? '');
   const nb = normalize(b.bytes, what, e.path ?? '');
   const h = (results.byHost[what] ??= { same: 0, differ: 0 });

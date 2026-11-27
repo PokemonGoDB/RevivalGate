@@ -28,7 +28,22 @@ DB = pathlib.Path(__file__).resolve().parent.parent / "data" / "starhearts.json"
 
 
 def number(value):
-    digits = f"{value & 0xFFFFFFFF:08X}"
+    """The reply the cartridge reads as value. Its hex reader (A000:350C) rotates the low
+    word left a digit at a time where it should shift it, so each digit pushed out of the
+    top comes back in at the bottom and is added to the next one: plain hex is read right
+    only below 0x10000 (it read 00010000 as 65537, seen in the game). So for the high
+    word's digits, lowest first, take back what the rotation adds. Below 0x10000 this is
+    plain hex.
+    The dialogue draws nine digits: with a tenth the first comes out as a stray character
+    (seen in the game), so the number stops at 999,999,999."""
+    value = min(value, 999_999_999)
+    x, low = value & 0xFFFF, ""
+    for shift in (16, 20, 24, 28):
+        d = (x - (value >> shift)) & 0xF
+        low = f"{d:X}" + low
+        x = (x - d) & 0xFFFF
+        x = x >> 4 | (x & 0xF) << 12
+    digits = f"{x:04X}{low}"
     count = f"{len(digits) + 4:03X}"[::-1]
     return f"{count}00{digits}".encode()
 

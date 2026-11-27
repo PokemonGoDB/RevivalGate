@@ -62,13 +62,33 @@ function tourRound(): number {
   return Math.max((t.year - 2026) * 12 + t.month - 9, 1);
 }
 
-/** Type 6: this month's Net Tour round (body after WSD\r): round number (word +0), qualifier cutoff
- * rank (word +6), entry fee in yen (word +10), start and end dates as yyyymmdd text (+168, +176;
- * shown as yy/mm/dd), course id (+0x96). */
+/** Week of the month's tour: 0 on the days before the first Monday, then 1, 2, ... from each Monday
+ * (up to 5). */
+function tourWeek(): number {
+  const t = jst();
+  return Math.max(0, Math.floor((t.day - t.weekday - 1) / 7) + 1);
+}
+
+/** Word +4 of the bulletin and of the round. The cart saves it with the round and downloads a round
+ * again only when the bulletin's round or this word differs from the saved ones (6000:1946; otherwise
+ * error 708), so it has to change whenever the conditions do: every Monday. The cart reads it as
+ * signed: below 4 is the qualifier, 4 is the final (the cart then asks types 10, 11 and 12, which we
+ * don't serve: see the doc) and above 4 is refused (errors 704/705). So weeks 0-3 go out as they are and
+ * weeks 4 and 5 as -1 and -2: still the qualifier to the cart. The values are ours; what Bandai sent is
+ * not known. */
+function stageWord(): number {
+  const week = tourWeek();
+  return week < 4 ? week : (3 - week) & 0xffff;
+}
+
+/** Type 6: this month's Net Tour round (body after WSD\r): round number (word +0), stage (word +4, see
+ * stageWord), qualifier cutoff rank (word +6), entry fee in yen (word +10), start and end dates as
+ * yyyymmdd text (+168, +176; shown as yy/mm/dd), course id (+0x96). */
 function bulletin(size: number): Uint8Array {
   const t = today();
   const body = new Uint8Array(size - 4);
   body.set(word(tourRound()), 0);
+  body.set(word(stageWord()), 4);
   body.set(word(100), 6);
   body.set(word(0), 10);
   body.set(bytesOf(t.first), 168);
@@ -83,8 +103,7 @@ function bulletin(size: number): Uint8Array {
  * round. */
 async function weekConditions(): Promise<{ rain: boolean; strength: number[]; direction: number[] }> {
   const t = jst();
-  const mondayDay = t.day - t.weekday;
-  const week = Math.max(0, Math.floor((mondayDay - 1) / 7) + 1); // 0 = days before the first Monday
+  const week = tourWeek();
   const final = week >= 4;
   const seed = `wclassic ${t.Y}-${t.m} week ${week}`;
   const sha = async (x: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(x)));
@@ -100,9 +119,11 @@ async function weekConditions(): Promise<{ rain: boolean; strength: number[]; di
 }
 
 /** Type 5, the Net Tour round (parser 6000:4F8E, unpacked into the tour save at SRAM 0xACF):
- *   +0 round (word; 0 = no tour)   +0xB2 start date, +0xBA end date, "yyyymmdd" (the entry deadline)
+ *   +0 round (word; 0 = no tour)   +4 stage (word, as in the bulletin: stageWord)
+ *   +0xB2 start date, +0xBA end date, "yyyymmdd" (the entry deadline)
  *   +0xC2 18 hole indexes, each a built-in course * 18 + hole (table 6000:50FE)
- *   +0xD4 18 bits, MSB first: rain on that hole
+ *   +0xD4 rain: byte +0xD4 = holes 1-8, byte +0xD5 = holes 10-17, MSB first. The parser takes 9 holes
+ *         from each byte, so holes 9 and 18 are always dry
  *   +0xD7 18 nibbles, high first: wind strength in m (0-15)
  *   +0xE0 18 nibbles: wind direction, 16 steps of 22.5 deg clockwise from straight up the hole screen
  *   +0xE9 18 (x, y) byte pairs: pin position; 0, 0 = the hole's default pin
@@ -111,12 +132,13 @@ async function netRound(size: number): Promise<Uint8Array> {
   const t = today();
   const body = new Uint8Array(size - 4);
   body.set(word(tourRound()), 0);
+  body.set(word(stageWord()), 4);
   body.set(bytesOf(t.first), 0xb2);
   body.set(bytesOf(t.last), 0xba);
   const c = await weekConditions();
   for (let h = 0; h < 18; h++) {
     body[0xc2 + h] = h;
-    if (c.rain) body[0xd4 + (h >> 3)] |= 0x80 >> (h & 7);
+    if (c.rain && h % 9 < 8) body[0xd4 + Math.floor(h / 9)] |= 0x80 >> (h % 9); // holes 9 and 18 have no bit
     const shift = h % 2 ? 0 : 4;
     body[0xd7 + (h >> 1)] |= c.strength[h] << shift;
     body[0xe0 + (h >> 1)] |= c.direction[h] << shift;
@@ -218,6 +240,29 @@ async function answer(conn: Conn, req: Uint8Array, session: Session): Promise<Ui
       log(`WSC type 1 (register): new member ${uid}`);
       return reply(0, [concat(WSD, bytesOf(`${uid}PASSWORD`))], size);
     }
+    case 2: {
+      // メンバーズカードの変更: the card again, in type 1's layout. The cart needs one record back with
+      // 10 bytes (it compares them with its member ID but ignores the result; no record gives error
+      // 705). We send the ID. What Bandai sent is not known.
+      const card = req.subarray(5);
+      const handle = new Uint8Array(16);
+      handle.set(card.subarray(0, 16));
+      // Refused as a new card would be: an error status, and the old card stays.
+      if (isOffensive(sjisText(handle))) {
+        log('WSC type 2 (card change): handle refused (name filter)');
+        return reply(1);
+      }
+      if (!(await writeAllowed(conn))) return reply(1);
+      const issued = await withState(conn, 'nclassic', fresh, (db) => {
+        if (!/^WC\d{8}$/.test(user) || Number(user.slice(2)) < 1 || Number(user.slice(2)) >= db.next) return false;
+        db.members[user] = { handle: hex(handle), pref: card.length > 54 ? card[54] : 0 };
+        const ids = Object.keys(db.members);
+        if (ids.length > MAX_MEMBERS) for (const old of ids.sort().slice(0, ids.length - MAX_MEMBERS)) delete db.members[old];
+        return true;
+      });
+      log(`WSC type 2 (card change): ${user}${issued ? '' : ' (not a member ID of ours: not kept)'}`);
+      return reply(0, [concat(WSD, bytesOf(user))], size);
+    }
     case 9: {
       // Net Tour entry (after the type-4 clock): round(4), 2 bytes, score (signed word, strokes over
       // par). An empty reply completes it.
@@ -297,7 +342,9 @@ async function answer(conn: Conn, req: Uint8Array, session: Session): Promise<Ui
           return concat(WSD, word(1), dword(shot.id), name, new Uint8Array(1));
         });
       log(`WSC type 16: ${rows.length} super shots`);
-      return reply(0, rows, size);
+      // The cart needs at least one record (none gives error 705): with no shots, one zero record,
+      // which ends the list (データがありません).
+      return reply(0, rows.length ? rows : [WSD], size);
     }
     case 15: {
       // One super shot (params: its 4-byte ID): the uploaded header.

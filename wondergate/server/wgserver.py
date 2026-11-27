@@ -20,6 +20,13 @@ import pathlib
 import re
 import struct
 import sys
+import time
+
+# The games' dates (tour weeks, daily counters, monthly stock, ranking dates) follow Japan time, as
+# Bandai's servers did and as the Worker does, whatever zone this machine is in.
+os.environ["TZ"] = "Asia/Tokyo"
+if hasattr(time, "tzset"):
+    time.tzset()
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import access  # noqa: E402
@@ -70,6 +77,8 @@ def route(host, path, headers=None, query=""):
         return lambda body: mail.start(path, body)
     if host == "www.mopera.ne.jp":
         return lambda body: portal.handle(path)
+    if host == "wg.channel.or.jp":   # the cart's "WonderSwan Web for WG" factory bookmark
+        return lambda body: portal.handle(host + path)
     if (host, path) == ("s_hearts.wgg.channel.or.jp", "/cgi-bin/starhearts.cgi"):
         return lambda body: starhearts.handle(path, query, body)
     if host == "battleg1.dark-eyes.com" and path.startswith("/cgi-bin/dark/"):
@@ -195,13 +204,14 @@ async def http_conn(reader, writer):
         save("http", host, path, head + body, {"request": request_line, "headers": headers})
 
         handler = route(host, path_only, headers, path.partition("?")[2]) or (static.route_any(path_only) if not host else None)
-        close, extra, eol, secret = False, None, "\r\n", False
+        close, extra, eol, secret, hangup = False, None, "\r\n", False, False
         if handler is None:
             status, ctype, rbody, note = 404, "text/plain", b"not implemented yet\r\n", "no handler"
         else:
             try:
                 status, ctype, rbody, note, *flags = handler(body)
                 close = "close" in flags
+                hangup = "hangup" in flags   # end the connection without announcing it
                 eol = "\n" if "lf" in flags else "\r\n"
                 secret = "secret" in flags
                 extra = next((f for f in flags if isinstance(f, dict)), None)
@@ -224,14 +234,17 @@ async def http_conn(reader, writer):
             writer.write(response(status, ctype, rbody, close, extra, eol))
         await writer.drain()
         # Some games read to end-of-connection instead of Content-Length.
-        if close or headers.get("connection", "").lower() == "close" or request_line.endswith("HTTP/1.0"):
+        if close or hangup or headers.get("connection", "").lower() == "close" or request_line.endswith("HTTP/1.0"):
             break
     writer.close()
 
 
 async def bpl_conn(reader, writer):
     """BPL: 24-byte header, little-endian type at 2 and total size at 4.
-    Echo the request header with type 0x0010 (allow, no blocks)."""
+    Echo the request header with type 0x0010 and no body: the cart then fetches the
+    page itself over HTTP. Its reader (cart ROM 0x1E8A5B) also takes pages drawn by
+    the server and games through this port; nothing we serve needs those
+    (docs/wondergate/mobilewondergate.md)."""
     try:
         while True:
             hdr = await asyncio.wait_for(reader.readexactly(BPL_HEADER), 60)

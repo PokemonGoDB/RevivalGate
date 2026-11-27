@@ -1,0 +1,7 @@
+POST http://tongpuso.wgg.channel.or.jp/cgi-bin/setrate.cgi HTTP/1.1
+Host: tongpuso.wgg.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 46
+
+c=55555555&d=444444ggguuu&e=249696&f=0&g=65535

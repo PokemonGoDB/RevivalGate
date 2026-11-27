@@ -1,6 +1,6 @@
 // Pocket no Naka no Doraemon: DORA MAIL date page on www.bea.hi-ho.ne.jp. A port of doraemon.py.
 // The cartridge reads fixed columns after the first "BR>": "MM/DD <weekday> HH:MM"; the date picks
-// which of the ROM's 39 seasonal mails arrive.
+// which of the ROM's 39 seasonal mails arrive. A 200 page without "BR>" hangs the game.
 import { bytesOf, jst } from './bytes';
 import { DORAEMON_WEEKDAYS } from './encoded';
 import type { Reply } from './http';

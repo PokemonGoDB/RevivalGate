@@ -42,6 +42,9 @@ CONTENT_TYPE = "application/x-swan-ranking-response"
 #   empty_name  owner shown on the placeholder row of an empty course (default "-")
 #   count_fmt   f(rows) -> the row count after "<listname>=" (default: decimal)
 #   rank_fmt    f(your rank) -> the rank in the course line (default: decimal)
+#   row_rank_max  cap on the rank that starts a row (default: none)
+#   row_fmt     {course: f(row number from 0, score digits) -> digits sent in that row}
+#   raw_owner   True when the name is sent unencoded and may hold '&' (see parse_form)
 def higher_is_better(score):
     return -int(score or 0)
 
@@ -50,9 +53,43 @@ def lower_is_better(score):
     return int(score or 0)
 
 
+def digits(v):
+    """Whether v is a number: ASCII digits only. str.isdigit() alone also takes bytes like 0xB2
+    ('²'), which int() then refuses."""
+    return v.isascii() and v.isdigit()
+
+
 def form_name(width):
     """Form-decode '+' to spaces and pad to a fixed width (D's Garage shows names)."""
     return lambda owner: owner.replace("+", " ")[:width].ljust(width)
+
+
+def form_decode(width):
+    """Undo Sennou Millennium's own form-encoding of a name (ROM 0xCE413: a space goes out as '+',
+    a plus as '%2b', nothing else is changed) and cut it to the game's width. The game shows a
+    row's name as it comes, so an echoed 'TARO++++' would show the plus signs."""
+    return lambda owner: owner.replace("+", " ").replace("%2b", "+")[:width]
+
+
+def tanetori_rank(n):
+    """D's Garage reads your rank as four characters but keeps only the last two: tens * 10 +
+    units, each character - '0' (ROM 0x42EC4: every MUL clears DX, where the sum so far was), so
+    "0123" shows as 23位. The tens go as one character instead, '0' + rank // 10, which reaches
+    2079. A '|' there would end the field, so 760-769 go as 75 tens and 10-19 units. Past 2079
+    the rank goes as 0000, which the game shows as ランク外 (unranked)."""
+    if n > 2079:
+        return "0000"
+    tens, units = divmod(n, 10)
+    if tens == 0x4C:
+        tens, units = tens - 1, units + 10
+    return "00" + chr(0x30 + tens) + chr(0x30 + units)
+
+
+def bar_free(stand_in):
+    """Raku Jongg's small ァ is character 0x7C, '|', which ends a row's name field: the rest of
+    the name is read as the stage and every later row of that table shifts (parser ROM 0xBF50E).
+    It goes back as `stand_in`, the full-size ア (0x85)."""
+    return lambda owner: owner.replace("|", stand_in)
 
 
 def one_char(limit):
@@ -70,6 +107,23 @@ def gunpey_puzzle(score):
     return "00000000" if score[-5:] == "10060" and int(score[:-5] or 0) == 0 else score
 
 
+def tarepang_puzzle(row, score):
+    """Tare Panda Puzzle rows: SSS 00 TTT ss = stage, two unused, 99 - minutes, 60 - seconds.
+    The game works the time out for the first row only: its row loop then jumps into the next
+    course's loop (ROM 0x9CA3F), which keeps the digits as they came, so a 3:20 in row 2 or 3
+    shows as 96:40. Those rows go out with the time already worked out, the way the game does
+    it for row 1 (ROM 0x9C9CA: when the seconds come to 0 the minute goes up by one). Digits
+    the game never uploads go back unchanged. Only that board reads these rows."""
+    if row == 0 or len(score) != 10:
+        return score
+    minutes, seconds = 99 - int(score[5:8]), 60 - int(score[8:])
+    if seconds == 0:
+        minutes += 1
+    if not (0 <= minutes <= 99 and 0 <= seconds <= 59):
+        return score
+    return f"{score[:5]}0{minutes:02d}{seconds:02d}"
+
+
 def pocketf_content(fields):
     """Pocket Fighter: extras and digital cards are both requested with group=0
     and no list, and read the same info= line differently: extras (subtype 0C,
@@ -84,34 +138,46 @@ def pocketf_content(fields):
 GAMES = {
     # Raku Jongg: your rank and the row count go as one character each (see one_char; parser
     # ROM 0xBF248, 0xBF359). The game announces ranks 1-20 only, so anything lower goes as 21.
+    # Names are the game's own character codes, sent as they are: its digit 6 is '&' and its
+    # small ァ is '|' (raw_owner, bar_free).
     "rakujang": {"courses": 3, "max_rows": 20, "name_max": 8, "header": False,
                  "count_max": 99, "score": {None: (1, 6)}, "group": 1,
-                 "rank_fmt": one_char(21), "count_fmt": one_char(20)},
+                 "rank_fmt": one_char(21), "count_fmt": one_char(20),
+                 "raw_owner": True, "name_fmt": bar_free("\x85")},
+    # GunPey EX: a score row has room for 6 characters (a 7th zeroes it), and the game shows the
+    # first six digits of that 7-digit field with "00" after them, the way it shows your own
+    # score. So the uploaded number goes back as it came, in 6 digits: 0001234560 is 12345600
+    # points on both lines. 10,000,000 points or more can't be sent and show as 09999900.
     "gunpeyex": {"courses": 5, "max_rows": 9, "name_max": 16, "header": True,
-                 "count_max": 9999, "score": {None: (10, 6), 3: (1, 8)}, "group": 1,
+                 "count_max": 9999, "score": {None: (1, 6), 3: (1, 8)}, "group": 1,
                  "reply_fmt": {3: gunpey_puzzle}},
-    # Another Heaven: quick-solve (早解き) ranking, lowest time first.
-    "heaven": {"courses": 1, "max_rows": 5, "name_max": 8, "header": False,
-               "count_max": 99, "score": {None: (1, 6)}, "group": 1,
+    # Another Heaven: quick-solve (早解き) ranking, lowest time first. Names are the console
+    # owner name, up to 16 characters; your rank shows as 4 digits (10000 would show 0000).
+    "heaven": {"courses": 1, "max_rows": 5, "name_max": 16, "header": False,
+               "count_max": 9999, "score": {None: (1, 6)}, "group": 1,
                "rank_key": {1: lower_is_better}},
-    # D's Garage 21: Tane o Maku Tori. Rank is exactly 4 digits; one row per course with a
-    # fixed 16-byte name (docs/wondergate/ds-garage.md).
+    # D's Garage 21: Tane o Maku Tori. Your rank is exactly 4 characters (see tanetori_rank); one
+    # row per course with a fixed 16-byte name (docs/wondergate/ds-garage.md).
     "tanetori": {"courses": 4, "max_rows": 1, "name_max": 16, "header": True,
                  "count_max": 9999, "score": {None: (1, 10)}, "group": 1,
-                 "course_fmt": "course={g}|{n}|{entrants}|{top}|{mine}|{rank:04d}",
+                 "rank_fmt": tanetori_rank,
                  "name_fmt": form_name(16), "empty_name": "NO RANKING DATA."},
     # Sennou Millennium: needs date=, course= and ranking=; rows start with a space;
     # each row carries its own rank: the top 10, then the places just ahead of you
     # and your own row, trimmed to fit its 895-byte receive buffer (sennou.md).
-    "sen-know": {"courses": 1, "max_rows": 10, "name_max": 16, "max_body": 740,
+    # The name arrives form-encoded (16 characters, up to 48 bytes) and goes back decoded.
+    # Entrants and ranks are 32-bit and show as 8 digits.
+    "sen-know": {"courses": 1, "max_rows": 10, "name_max": 48, "max_body": 740,
                  "header": lambda game: [time.strftime("date=%Y%m%d%H%M")],
-                 "count_max": 9999, "score": {None: (1, 8)}, "group": 1,
-                 "row_prefix": " "},
+                 "count_max": 99999999, "score": {None: (1, 8)}, "group": 1,
+                 "row_prefix": " ", "name_fmt": form_decode(16)},
     # Final Lap 2000: 16 courses of best lap times (95999 = no record), lowest first.
-    # First guess; verify (docs/wondergate/final-lap.md)
+    # The game keeps entrants and your rank in one byte each (rank 256 shows as 0), so both
+    # stop at 255. A row's rank is copied as 3 characters; a 4th overruns the game's memory
+    # and it hangs (parser ROM 0x4AF37), so rows stop at 999 (docs/wondergate/final-lap.md).
     "final-lap": {"courses": 16, "max_rows": 9, "name_max": 3,
                   "header": lambda game: [time.strftime("date=%Y%m%d")],
-                  "count_max": 9999, "score": {None: (1, 5)}, "group": 1,
+                  "count_max": 255, "row_rank_max": 999, "score": {None: (1, 5)}, "group": 1,
                   "rank_key": {c: lower_is_better for c in range(1, 33)},
                   "courses_per_group": True},
     # Pocket Fighter (after the charge-service handshake): tables 1 score, 2 total
@@ -122,9 +188,11 @@ GAMES = {
                 "content": pocketf_content},
     # Tare Panda no GunPey: fixed 10-char score fields, echoed as uploaded.
     # Puzzle times are stored as complements too (row display ROM 0x9C9CA), so
-    # higher is better there as well.
+    # higher is better there as well; rows 2 and 3 of that board need the time itself
+    # (see tarepang_puzzle).
     "tarepang": {"courses": 4, "max_rows": 9, "name_max": 16, "header": True,
-                 "count_max": 9999, "score": {None: (1, 10)}, "group": 1},
+                 "count_max": 9999, "score": {None: (1, 10)}, "group": 1,
+                 "row_fmt": {3: tarepang_puzzle}},
     # Uchuu Senkan Yamato: ヤマト指数 (0-65535), top 50. The game reads only date= (which
     # also sets how many crew logs it shows) and the rows; its row-count parser drops a
     # second digit, so the count goes as one character, '0' + n (docs/wondergate/yamato.md).
@@ -180,12 +248,15 @@ class Store:
         return len(rows), page, rank, mine
 
 
-def parse_form(body):
+def parse_form(body, raw_owner=False):
     """Split a form body without URL-decoding (names are echoed back byte-exact).
-    Returns a list of (key, value); keys can repeat."""
+    Returns a list of (key, value); keys can repeat. With raw_owner the name may hold '&' and
+    '=' (Raku Jongg's 6 and さ): it runs up to the score field that always follows it."""
     out = []
     for part in body.decode("latin-1").strip("\r\n\x00").split("&"):
-        if "=" in part:
+        if raw_owner and out and out[-1][0] == "owner" and not part.startswith("score="):
+            out[-1] = ("owner", out[-1][1] + "&" + part.strip("\r\n\x00"))
+        elif "=" in part:
             k, v = part.split("=", 1)
             out.append((k, v.strip("\r\n\x00")))
     return out
@@ -194,7 +265,7 @@ def parse_form(body):
 def handle(store, game, body):
     """Return (status, content_type, body_bytes, note)."""
     cfg = GAMES[game]
-    fields = parse_form(body)
+    fields = parse_form(body, cfg.get("raw_owner", False))
     first = {}
     for k, v in fields:
         first.setdefault(k, v)
@@ -202,7 +273,7 @@ def handle(store, game, body):
 
     player = first.get("*", "")
     owner = first.get("owner", "")[:cfg["name_max"]]
-    group = int(first["group"]) if first.get("group", "").isdigit() else 1
+    group = int(first["group"]) if digits(first.get("group", "")) else 1
     # Pocket Fighter: one table per group (1 score, 2 total points, 3-14 a fighter's
     # points). Downloads give the group; uploads name each table in the course field
     # (score=02|<points>&score=07|<points>: total and Morrigan's points).
@@ -216,7 +287,7 @@ def handle(store, game, body):
         if k != "score":
             continue
         parts = v.split("|")
-        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+        if len(parts) >= 2 and digits(parts[0]) and digits(parts[1]):
             course, score = int(parts[0]), parts[1]
             extra = parts[2] if len(parts) > 2 else ""
             width[course] = (len(score), len(extra))
@@ -236,14 +307,15 @@ def handle(store, game, body):
         return 200, CONTENT_TYPE, b"", f"{owner!r} " + ", ".join(note)
     if "list" not in first:
         # Pocket Fighter reads "your rank" from the course line after an upload: the
-        # first table it sent (score, or total points).
+        # first table it sent (score, or total points). It says ランクイン for 1-50 and
+        # ランクがい (outside the best 50) for anything else, so the rank isn't cut to 50.
         out = []
         for course in range(1, cfg["courses"] + 1):
             total, rows, rank, mine = store.table(reply_key or table_key, course, 1, 1, player, owner,
                                                   rank_key(cfg, course))
             top = reply_score(cfg, course, rows[0][1] if rows else 0)
             out.append(f"course={cfg['group']}|{course}|{min(total, 9999)}|{top}|"
-                       f"{reply_score(cfg, course, mine)}|{min(rank, cfg['count_max'])}")
+                       f"{reply_score(cfg, course, mine)}|{min(rank, 9999)}")
         text = "\r\n".join(out) + "\r\n"
         return 200, CONTENT_TYPE, text.encode("latin-1"), f"{owner!r} " + ", ".join(note) + "; ranks"
 
@@ -254,7 +326,7 @@ def handle(store, game, body):
     # rows, then the N places ahead of the player down to the player.
     lp = first["list"].replace("%2b", "+").replace("%2B", "+").split("|")
     listname = lp[0]
-    num = lambda v: int(v.lstrip("+")) if v.lstrip("+").isdigit() else None
+    num = lambda v: int(v.lstrip("+")) if digits(v.lstrip("+")) else None
     start = num(lp[1]) if len(lp) > 1 and num(lp[1]) is not None else 1
     relative = len(lp) > 1 and lp[1].startswith("+")
     near = num(lp[2]) if len(lp) > 2 and lp[2].startswith("+") else None
@@ -300,7 +372,10 @@ def handle(store, game, body):
         out.append(f"{listname}={cfg.get('count_fmt', str)(len(ranked))}")
         name = cfg.get("name_fmt", lambda o: o)
         pre = cfg.get("row_prefix", "")
-        rows_text = [f"{pre}{i}|{reply_score(cfg, course, sc)}|{name(o)}|{e}" for i, (o, sc, e) in ranked]
+        row_cap = cfg.get("row_rank_max")
+        row_fmt = cfg.get("row_fmt", {}).get(course, lambda row, digits: digits)
+        rows_text = [f"{pre}{min(i, row_cap) if row_cap else i}|{row_fmt(k, reply_score(cfg, course, sc))}"
+                     f"|{name(o)}|{e}" for k, (i, (o, sc, e)) in enumerate(ranked)]
         if near is not None and "max_body" in cfg:
             # Drop the rows farthest ahead of the player until the reply fits the
             # game's receive buffer (the top rows and the player's own row stay).

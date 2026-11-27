@@ -43,7 +43,9 @@ export async function handle(conn: Conn, body: Uint8Array): Promise<Reply> {
   for (const course of courses) {
     const t = tables.get(course)!;
     if (!t.rank) entries.push(NONE);
-    else entries.push(`${String(t.rank).padStart(4, '0').slice(-4)}${t.top}${t.page[0].score}`);
+    // Four digits is all there is: past 9999 the place stays 9999. (Its last four digits would read as another
+    // place: 10000 as no rank, 10001 as CHAMPION.)
+    else entries.push(`${String(Math.min(t.rank, 9999)).padStart(4, '0')}${t.top}${t.page[0].score}`);
   }
   const t = jst();
   const today = `${t.Y}${t.m}${t.d}`;

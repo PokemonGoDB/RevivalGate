@@ -37,8 +37,12 @@ rakujang=<k>
   (`E`). Only `<stage>` (`0xBF566`, `add ax,bx`) reads two digits correctly. Checked in the game
   (2026-11-25) with 14 better scores on the server: "ストーリー戦は 15位です。おめでとう", and
   公的記録 lists all 16 rows; with decimal "15" and "16" it would say 10位 and stop at row 10.
-- `<score>`: up to 6 digits; shown ×100 (`240450` → 24045000点).
-- `<stage>`: shown +1 as 『N面』.
+- `<score>`: 2 to 6 digits; shown ×100 (`240450` → 24045000点, `999999` → 99999900点). The parser
+  measures the field and has a case for each length from 2 to 6; any other length, 7 or more
+  included, reads the first character only (`0xBF3AD`). We always send 6.
+- `<stage>`: one or two digits. Story shows it +1 as 『N面』 up to `04`; `05` or more shows 『完勝』.
+  Dan rank and Time attack show a grade instead: `02` 8級 … `09` 1級, `10` 初段, `11` 2段 … `19` 10段,
+  `99` 雀聖 (seen 2026-11-26; values between 20 and 98 were not tried).
 - `<owner>`: up to 8 chars, the low bytes of the game's 16-bit character codes (the cart EEPROM
   holds the default name あふろざむらい as `33 4E 5F 68 53 5B 34`). Echo it byte-exact. Table, read
   off 私的記録 with each code poked into the saved names (2026-10-15; symbols rechecked
@@ -49,6 +53,43 @@ rakujang=<k>
   `DD` ends the name: the game draws nothing after it. This came from the local records screen
   (私的記録); the downloaded tables are shown with the same font under 記録 → 公的記録 (20 slots
   per mode, your own row underlined).
+- **Two of those codes are form and row separators**, because the name goes out as raw codes
+  (seen 2026-11-26 with names poked into the save):
+  - The digit 6 is `0x26`, `&`. A name あ6い is sent as `owner=3&4&score=…`, and a plain form
+    split stored it as あ. The server now reads the name up to `&score=`.
+  - The small ァ is `0x7C`, `|`. In a table row it ends the name early: the rest of the name is
+    read as the stage and the next rows shift (with ァ in row 3, rows 3–7 showed digits as names
+    and wrong scores). We send it back as the full-size ア (`0x85`): あァいう shows as あアいう.
+    The stored name keeps the ァ. This stand-in is ours.
+
+## 公的記録 at 20 rows (2026-11-26)
+
+With 25, 19 and 19 other scores seeded on the three courses, the game said "ストーリー戦は 圏外です。
+ざんねん" (26th, sent as 21), "段位認定戦は ２０位です。おめでとう" and "タイムアタックは 1位です", and 公的記録
+(記録 → 公的記録 → mode; DOWN scrolls three rows) listed all 20 rows of each mode with the right
+names, scores and stages, our own row underlined at 20位 and 1位 and absent from Story. Rows
+used 8-character names of digits, kana, katakana, the symbols `CE`–`DC` and the space `DD`, a
+one-character name, the score 999999 and the stage 99. The row is underlined by rank, not by
+name.
+
+Proof that a reply was taken (RAM, cleared before each download): the tables are three blocks of
+`0x232` bytes at `0xEF00`, `0xF132`, `0xF364`: 20 names of 9 words, then scores (`+0x168`: top two
+digits as a word, then the low four as a word, then 0) and stages (`+0x1E0`, 4 bytes each), and
+your rank in the block's last word (`0xF130`, `0xF362`, `0xF594`). For the replay on a fresh
+server `0xEF00` holds `33 00 4E 00 5F 00 68 00 53 00 5B 00 34`, `0xF06A` = `E8 03` and the three
+rank words are 1. With the table's body replaced by `?` bytes they stay 0 and the game sits on
+通信中 (its scan for `course` never ends).
+
+## Open: one name per mode
+
+The save has a record per mode, each with its own name (cartridge EEPROM `0x00`, `0x1E`, `0x3C`:
+8 name words, the score as a 32-bit number at `+0x14`, the stage at `+0x18`), and each POST
+carries its own mode's name. The table request is the third POST, so the server looks up all
+three ranks under the Time attack name. With three different names poked in, the Story and Dan
+ranks came back as 0 and the game said 圏外 for both, though both rows were 4th of 4 on the
+tables it had just downloaded. Not fixed: the server would have to remember the first two POSTs
+of a connection, or decide that the `*` id alone names a player (it is `FFFFFF` for everyone on
+an emulator). How the game lets a player end up with different names was not looked at.
 
 ## Client details (HTTP lib at ROM `0xCC00`–`0xD1C2`)
 

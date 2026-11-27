@@ -95,6 +95,24 @@ Tamers there is no stage byte. As in D1 Tamers, the ranking battle sends login, 
 **before** the fight; the cartridge then fights it out (mode `0x19`, battle type `DS:2AF4` = 4) and
 shows the downloaded ranking. Nothing is reported back.
 
+Checked in the game (2026-11-26):
+
+- The fight runs by itself, with or without button presses, and its outcome depends only on the two
+  parties and the seed: seed `05` gave LOSE and seed `41` WIN at two different timings each (against
+  an opponent with ×3 caps). `DS:0920` (RAM `0xC920`) is `00` after WIN and `01` after LOSE.
+- After the ranking battle the cartridge shows the ranking it downloaded before the fight; B returns
+  to the WonderGate menu. No request follows. The next ranking battle's login, rankbtl and rankdl
+  bodies were byte for byte the same after a win and after a loss as before the first battle.
+- でんどうバトル is login + idsrch, hang up, dial again, idbtl, hang up, the battle, then the menu.
+  No request follows, and both rank boxes on its VS screen are blank.
+- The cartridge keeps no rank of its own. The VS screen shows the battle reply's rank words + 1
+  ("12" against "11" for 11 and 10; the challenger's 0 reads "ランクがい"), the lists show each
+  profile's rank word as sent.
+
+The server holds everything the outcome depends on (both parties, and it picks the seed), so Bandai's
+server could have run the same battle itself; the archived admin pages list ranking-battle debug
+pages. Whether it did is not known.
+
 ## Our server
 
 [`server/digimon.py`](../../wondergate/server/digimon.py) serves both games from one handler; a
@@ -103,13 +121,33 @@ and data file.
 
 - IDs are eight digits, stored as bytes 0–9. Handles are unique per game.
 - Ladder as in D1 Tamers: a challenger fights the player one place above, and since the result is
-  decided in the cartridge after the reply, the server ranks by party strength from the record caps
-  (HP + DP + 4 × (AP + PP + SP)). The animation can disagree: in our test two identical parties tied,
-  the server kept the order and the cartridge showed WIN.
+  decided in the cartridge and never sent, the server guesses it from party strength, from the record
+  caps (HP + DP + 4 × (AP + PP + SP)); a tie leaves the order. This is our rule, and the ranking shown
+  right after the battle is already the server's guess.
+- **The guess is often wrong for this game** (measured in the game, 2026-11-26, with the one party we
+  can build, against a copy of it with the HP, DP, AP and PP caps scaled, four seeds each): the
+  challenger won on screen 4 of 4 times against an opponent at ×0.5, ×0.9, ×1 and ×1.5, 3 of 4 at ×2
+  and ×2.5, 2 of 4 at ×3 and ×4, and lost at ×5 and ×30. Two identical parties gave WIN for the
+  challenger with all nine seeds tried, and the server left them one place below the tamer they had
+  just beaten (seen on the list that follows the fight). The server says "win" only for a weaker opponent, so
+  it agreed at ×0.5 and ×0.9 and in 6 of the other 24 battles. One Digimon against its copy is a
+  narrow test; agreeing in general needs the cartridge's battle code run on the server. Not done,
+  and the rule is unchanged.
 - **でんどうバトル (hall of fame)**: the game searches with a blank key (`FD`×8). Bandai's hall of fame
   (a weekly-ranking hall of fame, per the archived admin pages) is lost. Ours enshrines each week's
   ladder leader (ISO weeks) and also lists the current leader, newest first, at most 8. The battle
-  uses the tamer's current party.
+  uses the tamer's current party. The week is checked on every Brave Tamer request, before the
+  ladder can change: the first request of a new week puts whoever leads the ladder into the hall for
+  the week that ended. Until 2026-11-26 this happened only when someone opened the hall, with
+  whoever had led at the previous opening, so a leader nobody looked at was never recorded. Checked
+  in the game with data dated one week back (ライバル leading): the player won a ranking battle,
+  took first place and opened the hall; before the change the list was "1 あい", after it
+  "1 あい / 2 ライバル". The current leader is listed even when it is the player asking; the
+  list then starts with the player's own entry.
+- Lists hold 8 entries. The ranking reply is the top 8, so a tamer ranked 9th or lower does not see
+  their own row. What Bandai sent then is not known.
+- A handle stays taken after データしょうきょ: signing up again with the same handle is refused. The
+  game's own warning before deleting says so ("トウロクされている ハンドルネームは シヨウできなくなります。").
 - Login news is our own message ("ワンダーゲート サーバー ふっかつ！ ランキングバトル かいさいちゅう。").
 - Unknown IDs: rankbtl/idupld answer `01`; idbtl answers "not found".
 
@@ -131,16 +169,71 @@ For `braverank`/`bravehall` the replay also pokes the registered flag `0xFA0C` =
 
 ## Verified (2026-10-14)
 
-Headless, against our server (captures committed): signup of two tamers (and "handle taken" for a
-duplicate), ranking battle as #1, ranking battle as a challenger played to the end, ranking view,
-hall-of-fame search and battle played to WIN, local data deletion and re-signup. Commands 4 (name
-search) and 5 (ID upload) were exercised by poking `0xFB76` during the menu transition; the server
-answers them, but the game never offers them.
+Headless, against our server: signup of two tamers (and "handle taken" for a duplicate), ranking
+battle as #1, ranking battle as a challenger played to the end, ranking view, hall-of-fame search and
+battle played to WIN, local data deletion and re-signup. Commands 4 (name search) and 5 (ID upload)
+were exercised by poking `0xFB76` during the menu transition; the server answers them, but the game
+never offers them.
+
+The requests of that session that are in `wondergate/captures/` (16 files, all named
+`20261014-1157…` or `20261014-1158…` `-http-digi_b.wgg.channel.or.jp_cgi-bin_dmB<name>.cgi.bin`;
+each holds the request only):
+
+| Flow | Files (time part of the name) |
+|---|---|
+| Signup, tamer 1 and tamer 2 | `115724-551` signup, `115748-834` signup |
+| Ranking battle as #1 (tamer 1) | `115731-811` login, `115731-824` rankbtl, `115731-831` rankdl |
+| Ranking view | `115732-222` login, `115732-231` rankdl |
+| Ranking battle as a challenger (tamer 2), twice | `115756-947` login, `115756-956` rankbtl, `115756-967` rankdl; `115834-093`, `115834-101`, `115834-113` |
+| Hall-of-fame search and battle | `115822-663` login, `115822-689` idsrch (blank key), `115823-355` idbtl |
+
+Not among the captures: the refused duplicate signup and the re-signup after deletion, command 4
+(an idsrch with a typed key) and command 5 (idupld). Until 2026-11-26 this page said all of it was
+captured.
+
+## Checked in the game (2026-11-26)
+
+Headless, against the reference server; the party poke of [Reaching it](#reaching-it) is the only
+shortcut, the other tamers were written into the server's data.
+
+- Ranking with 8 entries: 8 rows, 8-character handles fit, the cursor starts on the last row, the
+  player's own row is drawn in red, A shows the entry's handle, region and Digimon. With 12 on the
+  ladder and the player 12th: the top 8, no own row; the VS screen shows "12" against "11" and an
+  8-character handle in full.
+- Hall of fame with the leader and 10 past leaders: 8 rows (the leader and the newest 7), cursor on
+  the first; the number in front of each is that tamer's current rank.
+- Nobody ranked (ranking and hall): "データがみつかりません。", then the news, then the menu. Alone on
+  the ladder: "げんざいあなたがトップです！ バトルのヒツヨウはありません。 デジモンはコウシンされました。".
+- Duplicate signup: "このハンドルネームは しようできません。 ちがうハンドルネームを トウロクしてください。", also
+  after データしょうきょ and a new とうろく with the old handle.
+- Command 5 (poke `0xFB76` = 5 right after pressing A on the menu): login, idupld,
+  "トウロクされました。". Command 4 could not be driven this time: the garbled entry screen took the
+  keys of the signup screen but no request followed.
+- Two tamers from one cartridge, all by menu after the party poke: とうろく, ランキングバトル (first
+  place), データしょうきょ, とうろく with another handle, ランキングバトル (VS screen, the fight, the
+  list), でんどうバトル against the first tamer.
+- A reply that is not ours: HTTP 404 gives "サーバとのコウシンでエラーがハッセイしました。" with "エラー 499"; no
+  server gives "ワンダーゲートがセツゾクされていないか、デンチがありません。" with "エラー 1".
 
 Regression (`emu/replays.txt`): `bravetamer` (signup), `braverank` (login + rankdl), `bravehall`
-(login + hall-of-fame idsrch); all pass on an empty and a populated database.
+(login + hall-of-fame idsrch). How the game's memory tells an accepted reply from an error (each
+seen both ways, against the server and against a 404 or no server):
+
+| Replay | After success | After a refusal or error |
+|---|---|---|
+| `bravetamer` | RAM `0xFA0C` = `01`, ID at `0xFA17` | `0xFA0C` = `00` (also when the handle is taken, so it fails on a database that already has あい) |
+| `braverank`, `bravehall` | news at RAM `0xFA20` = `85 87 92 AB 8B AB`…, mode `0xCA82` = `30` | `0xFA20` = `8E A8 5C 77 5C 38`… (the built-in text), mode back to `2F` (menu) |
+
+On an empty server `braverank` and `bravehall` end on "データがみつかりません。" and the news: the replies
+are taken, but there is no list to show. After a battle reply the opponent's profile is at RAM
+`0xF7E4`; the last ranking is at `0xFAA0` (count `0xFB70`), the last search list at `0xF91C`.
 
 ## Open
 
 - Normal-play route: play (or obtain a real save) to the first partner, then replace the party poke.
 - The hall of fame is our rule (weekly leaders); Bandai's list and exact rule are lost.
+- The ladder moves by a strength guess that the game's own WIN/LOSE often contradicts (see
+  [Our server](#our-server)). Matching it needs the battle code (mode `0x19`) run on the server.
+- Not checked: a party of two or three Digimon, or any Digimon but the debug party's (the WonderGate
+  needs a save we do not have); the week change on the Worker (the same rule, read from the code);
+  anything on a real console.

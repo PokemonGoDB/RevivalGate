@@ -1,0 +1,8 @@
+POST http://wgg01.channel.or.jp/service/swan-ranking/pocketf HTTP/1.1
+Host: wgg01.channel.or.jp
+User-Agent: SWAN/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 29
+X-swan-cnts-aid: w92Vwh0s_TfNnKPc5o0jp6F-skA48SlwXP9WeP1_CfRr5mqOOs4jUvy9-ECLmpOsp6WwycMetE7vJC4M
+
+*=fzyA0001&owner=CAPE&group=0
