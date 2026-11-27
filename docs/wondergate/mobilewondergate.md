@@ -6,7 +6,11 @@ our server, and the MAILER receives (POP3) and sends (SMTP) mail between WonderG
 (never to the internet; see [limits and risks](#mail-limits-and-risks)). The GAME menu runs a game
 downloaded through the browser. The original games are lost, so the portal offers our own:
 **スネーク (Snake)**, [`games/snake/snake.asm`](../../wondergate/games/snake/snake.asm). Servers: [`server/portal.py`](../../wondergate/server/portal.py),
-[`server/mail.py`](../../wondergate/server/mail.py); BPL "allow" is in `wgserver.py`.
+[`server/mail.py`](../../wondergate/server/mail.py); the BPL reply is in `wgserver.py`.
+
+Checked again in the running cart on 2026-11-26: every BPL reply type the cart handles
+([BPL](#bpl-port-5555)), the three [factory bookmarks](#factory-bookmarks), and mail sent from
+one account and received by another ([Mail](#mail-mailmoperanejp)).
 
 ## Browser
 
@@ -14,12 +18,66 @@ Portal pages ([`server/portal.py`](../../wondergate/server/portal.py)): home, �
 from `docs/wondergate/progress.json`, the same per-game status as the website), お知らせ,
 メールのつかいかた, and ゲームダウンロード (Snake).
 
-Every page load first asks BPL (`bpl01/02.mopera.ne.jp:5555`, answered "allow"), then sends
-`GET … HTTP/1.0` with `User-Agent: SWAN/1.0`. Pages are Shift-JIS HTML 3.2 with forms
+Every page load first asks BPL (`bpl02.mopera.ne.jp:5555`, then `bpl01`; see
+[BPL](#bpl-port-5555)), is told to fetch the page itself, and then sends `GET … HTTP/1.0` with
+`User-Agent: SWAN/1.0`. Pages are Shift-JIS HTML 3.2 with forms
 (`TEXT PASSWORD CHECKBOX RADIO HIDDEN SUBMIT RESET IMAGE FILE`, `TEXTAREA`, `SELECT`).
-Toolbar (START): back, forward, home, reload, …, URL entry, ネットワークを切断 (7th icon), settings.
+Toolbar (START), left to right: back, forward, home, reload, open a URL, bookmarks, connect or
+disconnect (ネットワークへ接続 / ネットワークを切断), settings, back to the main menu. The cursor stays
+where it was left. A 404 with a `text/plain` body shows as an empty page.
 The cart ends a call by powering the adapter off (`0F FF`) after a power-on; the adapter
 core now keeps the call state across that power-on and logs it as the hang-up.
+
+## BPL (port 5555)
+
+BPL was mopera's proxy for this browser: the cart sends it the URL and its screen size, and the
+server could send back the finished page. Worked out from the cart's reader (ROM `0x1E8A5B`, caller
+`0x1E86FE`) and then tried in the cart with a test server that sent each reply type (2026-11-26).
+
+Request: a 24-byte header (`01 18`, type `00 00`, total size as 4 bytes, 8 zero bytes, `D8 00` =
+216, the page width in pixels, then `C0 01` and `FF FF 00 00`), then records of
+`[length, 2 bytes][type, 2 bytes][text]`: type 1 is the URL without `http://`, type 3 the page the
+link was on. URLs that start with `start.mopera.ne.jp` are never asked about (ROM `0x1E872F`).
+
+Reply: the same header with the type in bytes 2-3 (only the low 6 bits count) and the total size
+in bytes 4-7, then the body. What each type does, as seen in the cart:
+
+| Type | What the cart does |
+|---|---|
+| `0x10` | Reads no body and fetches the URL itself over HTTP. This is what we always send. |
+| `0x12` | A game: the body holds a record `[length, 2][06][game]`, stored for the GAME menu like an `APPLICATION/WONDERGATE` download. Shows ダウンロード終了. Our Snake sent this way ran from GAME. |
+| `0x21` | Opens a box asking for ID and PASS (パスワードの入力). What the cart sends after that was not followed. |
+| `0x23` | Reads no body and shows ﾍﾟｰｼﾞが大きくすべて表示できません ("the page is too big to show"). |
+| anything else | The body is the page, already drawn by the server: records of `[length, 2][04][2 bytes]` + tiles (2 bits per pixel, 448 bytes for each row of 28 tiles), with the page size in header bytes `0x0E`-`0x17`; the other records are copied to the page's link list. A test pattern sent as type `0x00` and as `0x11` appeared on screen. The layout of the link records is not worked out. |
+
+A body may also come packed: `FF FF 00`, 5 bytes (the first is the number of blocks), then blocks of
+`[00 = plain, 01 = LZSS][1 byte][length, 2][unpacked length, 2][data]` and two zero bytes
+(ROM `0x1E8C7C`-`0x1E8F9E`). This was read from the code only, not tried.
+
+Nothing our server offers needs the other types: pages and the game download go through HTTP after
+type `0x10`. The one thing in the cart that cannot work that way is the first factory bookmark
+(below). What mopera's server really answered, and for which URLs, is not known.
+
+## Factory bookmarks
+
+The cart comes with three bookmarks (ROM `0x1EAB08`). Opened in the cart on 2026-11-26:
+
+| Title | URL | What happens |
+|---|---|---|
+| ゲームダウンロード | `game/` | BPL is asked about `game/`. After our type `0x10` the cart looks up a host called `game`, which doesn't exist, and shows 501.サーバの応答がありません. Not served. |
+| ドコモホームページ(テキスト) | `www.nttdocomo.co.jp/mc-user/` | The adapter doesn't redirect this name, so the request goes to NTT Docomo's real web server, which today answers 301. The cart doesn't follow redirects and shows "Moved Permanently". Not ours to serve. |
+| WonderSwan Web for WG | `wg.channel.or.jp/` | Reaches our server (`*.channel.or.jp` is redirected). Bandai's page is lost. The server answers with a page of ours (`portal.py`, keyed by host + path) that says so and links to the portal. |
+
+`game/` has no host name, so on the original service the BPL server must have answered it itself
+(a drawn page or a game); that is an inference. Two ways to make it do something were tried in the
+cart with scratch changes and both work, but neither is built, because both are choices about what
+that bookmark should mean:
+
+- BPL answers `game/` with type `0x12` and Snake. The download starts at once, with no page saying
+  whose game it is or that it replaces the stored one.
+- The adapter resolves the name `game` to our server (a `redirect game` line in its config) and the
+  server answers `Host: game` with the ゲームダウンロード page. The cart then sends
+  `GET / HTTP/1.0`, `Host: game`, and the page's `/game.wg` link downloads Snake.
 
 ## Mail auto-setup (`start.mopera.ne.jp`, dial `0120-903-025`, then `#9601`)
 
@@ -42,7 +100,9 @@ MAILUSERNAME:wg00001       MAILPASSWORD:…
 
 Lines end in LF, and the reply must end in four LFs (or `</HTML>`): the cart only treats the
 data as complete then (`0x1106A`). The screen then shows 自動設定完了 and the MAILER settings
-are filled in. Each setup makes a new account.
+are filled in. The page stays on screen, and every further press of 設定する makes another account
+(the cart keeps the last one). The cart's address then sits in its save memory at SRAM bank 0
+`0xF105`.
 
 ## Mail (`mail.mopera.ne.jp`)
 
@@ -64,6 +124,25 @@ are filled in. Each setup makes a new account.
 
 The cart caches DNS answers between sessions and may connect straight to the server's IP, so
 the adapter core now learns the server address on connect too (for its port map).
+
+Checked in the cart on 2026-11-26, from power-on against an empty server:
+
+- One press of 設定する, then 受信 (MAILER toolbar, first icon): the ようこそ mail arrives and opens.
+- メールの新規作成 (third icon): 宛先 → START → 宛先を入力 → 新規作成 → アドレス, typed on the
+  keyboard, 決定, START → ○, START → 戻る; 件名 and the text typed the same way; START → 送信.
+  The cart reads the daytime server, sends the mail by SMTP and hangs up.
+- 受信 again: the mail is in the inbox with its sender, date and text. The words at `0xE382` of
+  SRAM bank 0 and `0x0100` of bank 4 are then 2, and 1 if the mail was not sent (seen both ways;
+  they look like the inbox count). Which bank the MAILER leaves mapped while it idles varied
+  from run to run, so read bank 0 from the main menu.
+- A second cart with its own account (`wg00002`) sent to the first cart's address; the first
+  cart received it and showed `"wg00002" <wg00002@mopera.ne.jp>` as the sender.
+
+The server's own mails (welcome and "didn't arrive") carry a `Date:` in Japan time (`+0900`)
+whatever the host's time zone, the same as the Worker. With no mail waiting the cart shows
+メールはありません. With the SMTP port closed the mail stayed in the 送信ボックス. Not checked: what
+the cart shows when SMTP answers with an error, mail to an address outside `@mopera.ne.jp` (the
+"didn't arrive" notice), CC and BCC, and deleting mail.
 
 ## Mail: limits and risks
 
@@ -126,8 +205,10 @@ It's 1.6 KB: `python3 font.py && nasm -f bin -o snake.bin snake.asm` in `games/s
 portal serves `snake.bin` (or `MWG_GAME_FILE`) at `/game.wg`.
 
 Regression: `mwgbrowser`, `mwgmail` and `mwggame` (download Snake, then start it from GAME) in
-`emu/replays.txt`. Typing on the cart's keyboard:
-`tools/mwg_type.py`.
+`emu/replays.txt`. As of 2026-11-26 `mwgmail` covers the auto-setup only, and it presses 設定する
+three times, so it makes three accounts; sending and receiving have no replay there yet. Typing
+on the cart's keyboard: `tools/mwg_type.py`. The address keyboard opens in 英数 with the cursor on
+`a` (start `0,1`); 決定 is the last key of the bottom row.
 
 ## The original downloads
 

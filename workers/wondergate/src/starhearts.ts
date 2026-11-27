@@ -7,8 +7,23 @@ import type { Reply } from './http';
 import { writeAllowed } from './limits';
 import { withState } from './state';
 
+/** The reply the cartridge reads as value. Its hex reader (A000:350C) rotates the low word left a digit at a
+ *  time where it should shift it, so each digit pushed out of the top comes back in at the bottom and is added
+ *  to the next one: plain hex is read right only below 0x10000 (it read 00010000 as 65537, seen in the game).
+ *  So for the high word's digits, lowest first, take back what the rotation adds. Below 0x10000 this is plain
+ *  hex. The dialogue draws nine digits: with a tenth the first comes out as a stray character (seen in the
+ *  game), so the number stops at 999,999,999. */
 function number(value: number): string {
-  const digits = (value >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  const v = Math.min(value, 999_999_999) >>> 0;
+  let x = v & 0xffff;
+  let low = '';
+  for (const shift of [16, 20, 24, 28]) {
+    const d = (x - (v >>> shift)) & 0xf;
+    low = d.toString(16).toUpperCase() + low;
+    x = (x - d) & 0xffff;
+    x = (x >>> 4) | ((x & 0xf) << 12);
+  }
+  const digits = x.toString(16).toUpperCase().padStart(4, '0') + low;
   const count = (digits.length + 4).toString(16).toUpperCase().padStart(3, '0').split('').reverse().join('');
   return `${count}00${digits}`;
 }

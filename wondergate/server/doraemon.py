@@ -5,8 +5,9 @@ GET /log_inguz_1999/index.shtml (HTTP/1.1). The cartridge (parser at ROM
     +3 MM  +5 '/'  +6 DD  +8 ' '  +9 weekday (2 bytes, Shift-JIS, ignored)  +11 ' '  +12 HH
 i.e. an SSI date like "10/13 火 12:34". Month/day pick which of the 39 seasonal
 mails stored in the ROM arrive (table at 0x3D7308: New Year, Setsubun,
-Valentine's, Tanabata, Christmas, ...); the hour stamps the mail. No "BR>"
-means error 400. The page's other text is ignored.
+Valentine's, Tanabata, Christmas, ...); the hour stamps the mail. The search
+for "BR>" has no end: a 200 page without it hangs the game, so it must always
+be there. The page's other text is ignored.
 """
 import datetime
 

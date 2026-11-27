@@ -10,13 +10,17 @@ Flow (title → 対戦 → ワンダーゲート → マッチング実行 → p
     nph-account   ACNT-ID ACNT-SID ACNT-CMD   -> ACNT-RETCD [body: message]   (prepaid "service")
     nph-reqmatch  MTCH-ID NAME LVL PASS RETRY -> MTCH-RETCD 0/1 = keep polling (POLINT, TIMEOUT
                   in seconds), 9 = error, 2 = matched: MTCH-ID NAME LVL (opponent),
-                  SEED, MATCH (side), HOST, PATH (where nph-match lives), ACOUNT BCOUNT COUNT
+                  SEED, MATCH (side), HOST, PATH (where nph-match lives), ACOUNT BCOUNT (the
+                  opponent's wins and losses so far, shown after the battle; we send 0), COUNT
     nph-match     MTCH-ID OID NAME CMD + body -> cmd 0 = post my battle data (RETCD 0 ok, 1 retry)
                                                  cmd 1 = fetch the opponent's (2 + body, 1 = not yet)
                                                  cmd 2 = post my turn (3)
                                                  cmd 3 = fetch the opponent's turn (5 + body, 4 = not yet)
+                                                 cmd 4 = I won (6); only the winner sends it
 The server pairs two players polling reqmatch (same PASS, if one is set) and
 relays party and turn data between them (two queues per side); the battles run in the cartridges.
+A turn carries no number, and the cart posts it again when a reply is lost, so the relay can't
+tell a repeat from the next turn (see the doc).
 
 Story mode, a guild's 傭兵の登録と雇用 (mercenaries) and 世界情勢 (world market):
     nph-upmrcnry  MCUP-ID PAY NAME CLASS LVL EXP STR DEX INT ATR EM RY SK0-3 IT0-3 HP
@@ -304,40 +308,76 @@ GROUPS = {"nph-login.cgi": "SRVC", "nph-account.cgi": "ACNT", "nph-upmrcnry.cgi"
           "nph-reqmatch.cgi": "MTCH", "nph-match.cgi": "MTCH"}
 HOST, PATH = "battleg1.dark-eyes.com", "/cgi-bin/dark/nph-match.cgi"
 POLL, TIMEOUT, STALE = 1, 60, 10
+# The cart counts every wait in frames against the last TIMEOUT it was sent and shows LOST when it runs
+# out (5900:3A37), so in a battle TIMEOUT is how long the other player may think about a turn. With the
+# search's 60 a player who thought for a minute ended the battle for both. 180 is the cart's own value
+# before a reply sets one (5900:3693); 873 is the most the cart's 16-bit frame count can hold.
+TURN_TIMEOUT = 180
+MATCH_IDLE = 600          # a battle neither side has asked about for this long is forgotten
 
 LOCK = threading.Lock()
 WAITING = {}   # key -> {"id", "name", "lvl", "pass", "seen"}
-MATCHES = {}   # key -> {"opp": key, "seed", "side", "inbox": [bytes], "sync": bool, "synced": bool}
+MATCHES = {}   # key -> {"opp": key, "info", "seed", "side", "inbox": [bytes], "turns": [bytes], "made", "seen", "announced"}
 
 
 def key_of(h):
     return h.get("x-swan-mtch-id", ""), h.get("x-swan-mtch-name", "")
 
 
+def partner(me, m):
+    """The other side's entry while it is still in this battle. A player who went back to
+    the search (and maybe into another battle) no longer points here."""
+    o = MATCHES.get(m["opp"]) if m else None
+    return o if o and o["opp"] == me else None
+
+
+def prune(now):
+    for k in [k for k, w in WAITING.items() if now - w["seen"] > STALE]:
+        del WAITING[k]
+    # The player whose turn it is sends nothing while thinking, so a battle is idle only
+    # when neither side has asked.
+    idle = [k for k, m in MATCHES.items()
+            if now - max(m["seen"], (partner(k, m) or m)["seen"]) > MATCH_IDLE]
+    for k in idle:
+        del MATCHES[k]
+
+
+def polling(timeout=TIMEOUT):
+    return {"X-SWAN-MTCH-POLINT": str(POLL), "X-SWAN-MTCH-TIMEOUT": str(timeout)}
+
+
 def reqmatch(h):
     me = key_of(h)
     now = time.time()
     with LOCK:
+        prune(now)
         m = MATCHES.get(me)
         if m and not m.get("announced"):
-            m["announced"] = True
-            return matched(m), f"reqmatch {me}: matched with {m['opp']}"
+            # A pair is made when the second player arrives, but the search sends nothing when it
+            # ends (it runs out after TIMEOUT, or the cart is switched off), so the one who was
+            # waiting may be gone. They hear first, on their next poll; the newcomer hears once
+            # they have, and looks again if they never do.
+            opp = partner(me, m)
+            fresh = opp and now - (opp["seen"] if opp.get("announced") else m["made"]) <= STALE
+            if fresh and (m["side"] == 0 or opp.get("announced")):
+                m["announced"] = True
+                m["seen"] = now
+                return matched(m), f"reqmatch {me}: matched with {m['opp']}"
+            if fresh:
+                return {"X-SWAN-MTCH-RETCD": "1", **polling()}, f"reqmatch {me}: found {m['opp']}, who hasn't answered yet"
         MATCHES.pop(me, None)
-        for k in [k for k, w in WAITING.items() if now - w["seen"] > STALE]:
-            del WAITING[k]
         pw = h.get("x-swan-mtch-pass", "")
         other = next((k for k, w in WAITING.items() if k != me and w["pass"] == pw), None)
         mine = {"id": me[0], "name": me[1], "lvl": h.get("x-swan-mtch-lvl", "1"), "pass": pw, "seen": now}
         if other is None:
             WAITING[me] = mine
-            return {"X-SWAN-MTCH-RETCD": "1", "X-SWAN-MTCH-POLINT": str(POLL),
-                    "X-SWAN-MTCH-TIMEOUT": str(TIMEOUT)}, f"reqmatch {me}: waiting"
+            return {"X-SWAN-MTCH-RETCD": "1", **polling()}, f"reqmatch {me}: waiting"
         them = WAITING.pop(other)
         WAITING.pop(me, None)
         seed = random.randrange(65536)
-        MATCHES[other] = {"opp": me, "info": mine, "seed": seed, "side": 0, "inbox": [], "turns": []}
-        MATCHES[me] = {"opp": other, "info": them, "seed": seed, "side": 1, "inbox": [], "turns": [], "announced": True}
-        return matched(MATCHES[me]), f"reqmatch {me}: matched with {other} (seed {seed})"
+        MATCHES[other] = {"opp": me, "info": mine, "seed": seed, "side": 0, "inbox": [], "turns": [], "made": now, "seen": now}
+        MATCHES[me] = {"opp": other, "info": them, "seed": seed, "side": 1, "inbox": [], "turns": [], "made": now, "seen": now}
+        return {"X-SWAN-MTCH-RETCD": "1", **polling()}, f"reqmatch {me}: found {other} (seed {seed}), who hasn't answered yet"
 
 
 def matched(m):
@@ -346,44 +386,55 @@ def matched(m):
             "X-SWAN-MTCH-LVL": o["lvl"], "X-SWAN-MTCH-SEED": str(m["seed"]),
             "X-SWAN-MTCH-MATCH": str(m["side"]), "X-SWAN-MTCH-HOST": HOST, "X-SWAN-MTCH-PATH": PATH,
             "X-SWAN-MTCH-ACOUNT": "0", "X-SWAN-MTCH-BCOUNT": "0", "X-SWAN-MTCH-COUNT": "0",
-            "X-SWAN-MTCH-POLINT": str(POLL), "X-SWAN-MTCH-TIMEOUT": str(TIMEOUT)}
+            **polling()}
 
 
 def match(h, body):
     me = key_of(h)
     cmd = h.get("x-swan-mtch-cmd", "")
-    poll = {"X-SWAN-MTCH-POLINT": str(POLL), "X-SWAN-MTCH-TIMEOUT": str(TIMEOUT)}
+    gone = {"X-SWAN-MTCH-RETCD": "9"}, b"", f"match {me} cmd {cmd}: no match"
     with LOCK:
         m = MATCHES.get(me)
-        opp = MATCHES.get(m["opp"]) if m else None
+        if m and not m.get("announced"):
+            m = None
+        opp = partner(me, m)
         if cmd == "4":
-            # The battle is over on this cart (5900:3A60, sent from the end-of-battle controller
-            # and repeated every POLINT until the answer is 6; 9 is an error). The other side may
-            # still be collecting the last turn, so the battle is dropped once both have said so.
+            # Only the winner's cart sends this, when the battle is decided (the end-of-battle
+            # controller at ROM 0x35E516 calls 5900:3A60 when the result byte at SRAM 0x4A0A is
+            # 0xFD; the loser and both sides of a draw just hang up). It asks again every POLINT
+            # until the answer is 6; 9 is an error. The battle is over for the sender; the loser
+            # keeps its side only while the last turn is still waiting to be collected.
             if m:
-                m["ended"] = True
-                if not opp or opp.get("ended"):
-                    MATCHES.pop(m["opp"], None)
-                    MATCHES.pop(me, None)
-            return {"X-SWAN-MTCH-RETCD": "6", **poll}, b"", f"match {me} cmd 4: battle over"
-        if not m or not opp:
-            return {"X-SWAN-MTCH-RETCD": "9"}, b"", f"match {me} cmd {cmd}: no match"
+                del MATCHES[me]
+                if opp and not opp["turns"]:
+                    del MATCHES[m["opp"]]
+            return {"X-SWAN-MTCH-RETCD": "6", **polling()}, b"", f"match {me} cmd 4: battle over"
+        if not m:
+            return gone
+        m["seen"] = time.time()
+        if cmd == "1" and m["inbox"]:
+            data = m["inbox"].pop(0)
+            return {"X-SWAN-MTCH-RETCD": "2", **polling(TURN_TIMEOUT)}, data, f"match {me} cmd 1: delivered {len(data)} bytes"
+        if cmd == "3" and m["turns"]:
+            data = m["turns"].pop(0)
+            if not opp and not m["turns"]:
+                del MATCHES[me]
+            return {"X-SWAN-MTCH-RETCD": "5", **polling(TURN_TIMEOUT)}, data, f"match {me} cmd 3: turn delivered ({len(data)} bytes)"
+        if not opp:
+            # The other player left this battle (gave up waiting and searched again, or won and
+            # said so) and there is nothing left to collect: tell this cart now, not after TIMEOUT.
+            del MATCHES[me]
+            return gone
         if cmd == "0":
             opp["inbox"].append(body)
-            return {"X-SWAN-MTCH-RETCD": "0", **poll}, b"", f"match {me} cmd 0: posted {len(body)} bytes"
+            return {"X-SWAN-MTCH-RETCD": "0", **polling()}, b"", f"match {me} cmd 0: posted {len(body)} bytes"
         if cmd == "1":
-            if m["inbox"]:
-                data = m["inbox"].pop(0)
-                return {"X-SWAN-MTCH-RETCD": "2", **poll}, data, f"match {me} cmd 1: delivered {len(data)} bytes"
-            return {"X-SWAN-MTCH-RETCD": "1", **poll}, b"", f"match {me} cmd 1: nothing yet"
+            return {"X-SWAN-MTCH-RETCD": "1", **polling()}, b"", f"match {me} cmd 1: nothing yet"
         if cmd == "2":
             opp["turns"].append(body)
-            return {"X-SWAN-MTCH-RETCD": "3", **poll}, b"", f"match {me} cmd 2: turn posted ({len(body)} bytes)"
+            return {"X-SWAN-MTCH-RETCD": "3", **polling(TURN_TIMEOUT)}, b"", f"match {me} cmd 2: turn posted ({len(body)} bytes)"
         if cmd == "3":
-            if m["turns"]:
-                data = m["turns"].pop(0)
-                return {"X-SWAN-MTCH-RETCD": "5", **poll}, data, f"match {me} cmd 3: turn delivered ({len(data)} bytes)"
-            return {"X-SWAN-MTCH-RETCD": "4", **poll}, b"", f"match {me} cmd 3: nothing yet"
+            return {"X-SWAN-MTCH-RETCD": "4", **polling(TURN_TIMEOUT)}, b"", f"match {me} cmd 3: nothing yet"
     return {"X-SWAN-MTCH-RETCD": "9"}, b"", f"match {me}: unknown cmd {cmd}"
 
 

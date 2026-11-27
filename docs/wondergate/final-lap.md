@@ -1,7 +1,7 @@
 # Final Lap 2000: W·G ranking ✅
 
-Status: **working** headless (2026-10-13): W·G RANKING shows per-course total time and lap time
-(TIME TRYAL), the national #1, the rival just ahead of you, and your own entry, with the date.
+Status: **working** headless (2026-10-13; limits 2026-11-26): W·G RANKING shows per-course total time
+and lap time (TIME TRYAL), the national #1, the rival just ahead of you, and your own entry, with the date.
 
 How to reach it: title → RANKING → press **Y1, Y3, Y4, Y2** (sequence from [Keitai Archive's WS-WonderGate-Patches](https://github.com/Keitai-Archive/WS-WonderGate-Patches)) → WONDER GATE appears → A → phone
 "##" OK (A) → NAME ENTRY (3 letters; A advances, START ends) → YES. Results: RANKING → W.G RANKING.
@@ -45,8 +45,34 @@ Confirmed with a real upload (2026-10-15): an England lap in Time Trial arrived 
 date=YYYYMMDD                      (required, else the whole parse fails)
 course=<g>|<n>|<entrants>|x|x|<your rank, or a space = unranked>     ×16
 FLTOP=<k>
-<rank>|<time ≤5 digits>|<name: exactly 3 chars>|<1 char>
+<rank ≤3 digits>|<time ≤5 digits>|<name: exactly 3 chars>|<1 char>
 ```
+
+## Limits (checked in the game, 2026-11-26)
+
+Checked headless against seeded tables of 9 to 12,001 entrants and hand-made replies.
+
+- **Your rank is one byte** (`0x4AEC3` stores it at RAM `0x17B6` + course). 255 shows as 255, 256 as
+  0, 257 as 1, 1000 as 232. The server now stops at 255: anyone lower sees 255. A space (unranked)
+  and 0 both show as `0`.
+- **Entrants are one byte too** (RAM `0x17D6` + course) and the W·G RANKING screen never shows them.
+  The server stops at 255.
+- **A row's rank is 3 characters** (`0x4AF37` copies them to RAM `0x174B`, padding short ones with
+  `0`). A 4-digit rank makes the padding count negative, the game fills memory with `0` and hangs
+  on a striped screen in the middle of the exchange. This happened to any player ranked 1001 or
+  lower (their rival's row is rank 1000+). The server now stops row ranks at 999.
+- **A time is 5 digits**; a 6th does the same damage (`0x4AFB0`). The server already cut times to 5.
+- The rival's rank is drawn by its own routine, which blanks a `0` in the tens place: 100 shows as
+  `1 0`, 105 as `1 5`, 300 as `3 0` (110 and 254 are fine). This is in the game; the server can't
+  change it.
+- The third line of each block (you) is the game's own saved time, not a row from the server.
+- Names are exactly 3 characters from the game's NAME ENTRY: A-Z, 0-9, space, `?`, `!`, `.`, sent
+  as they are (a space is a space).
+- A reply it can't read still ends with 通信が終了しました, but the W·G RANKING board is empty and has
+  no date. No answer from the server gives エラーNo. 501.
+
+Ours, not known from Bandai: stopping at 255 and 999, and ranking a fresh save's "no record" times
+(`95999` / `09999`) like any other time.
 
 ## Adapter/emulator findings from this game
 

@@ -32,6 +32,10 @@ ITEMS = range(2, 122)
 PER_MONTH = 12
 NAME_MAX = 5
 RANK_MAX = 255
+# The ranking screen draws seven digits of a score and drops the ones above (12345678 reads as
+# 2345678), and the cartridge's number reader (0x176D13) goes wrong from nine digits, so a larger
+# score is sent as this (tested in the game).
+SCORE_MAX = 9_999_999
 
 
 def wrap(section):
@@ -77,7 +81,7 @@ def entry(rank, name, score):
     '_' with no length check into 6 bytes, and the score then lands on the sixth. So 5 letters
     is the most that shows cleanly: a 6-letter name runs on into the score's bytes on screen,
     and two of them hung the ranking screen (tested in the game)."""
-    return f"{rank} {name[:NAME_MAX].replace('_', ' ')}_{min(score, 0xFFFFFFFF)} "
+    return f"{rank} {name[:NAME_MAX].replace('_', ' ')}_{min(score, SCORE_MAX)} "
 
 
 def handle(path, query, body):
@@ -89,7 +93,8 @@ def handle(path, query, body):
         data, ids = shop()
         note = f"wizardry shop {ids}"
     elif "nm" in q:
-        score = int(q.get("sc", "0")) if q.get("sc", "0").isdigit() else 0
+        sc = q.get("sc", "0")
+        score = int(sc) if sc.isascii() and sc.isdigit() else 0   # ASCII digits only ('²' is a digit to isdigit())
         data, rank = ranking(q["nm"], score)
         note = f"wizardry ranking {q['nm']} {score} -> #{rank}"
     else:

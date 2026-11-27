@@ -2,7 +2,9 @@
 //   POST /cgi-bin/dark/nph-<name>.cgi   fields in X-SWAN-<NAME> headers; replies end lines in a bare LF.
 // The server pairs two players polling nph-reqmatch (same PASS, if one is set) and relays their party
 // and turn data (two queues per side); the battles run in the cartridges. Matchmaking state lives in
-// D1 with versioned updates, so two players polling at once are paired exactly once.
+// D1 with versioned updates, so two players polling at once are paired exactly once. Every reply is
+// computed from the row it was committed with, so a poll that loses the version race runs again on
+// the fresh row and nothing is delivered or paired twice.
 //
 // Story mode, a guild's 傭兵の登録と雇用 (mercenaries) and 世界情勢 (world market):
 //   nph-upmrcnry   MCUP-ID PAY NAME CLASS LVL ... HP -> MCUP-RETCD, MCUP-MID (8 chars)
@@ -27,8 +29,13 @@ const PATH = '/cgi-bin/dark/nph-match.cgi';
 const POLL = 1;
 const TIMEOUT = 60;
 const STALE = 10;
+// The cart counts every wait in frames against the last TIMEOUT it was sent and shows LOST when it runs
+// out (5900:3A37), so in a battle TIMEOUT is how long the other player may think about a turn. With the
+// search's 60 a player who thought for a minute ended the battle for both. 180 is the cart's own value
+// before a reply sets one (5900:3693); 873 is the most the cart's 16-bit frame count can hold.
+const TURN_TIMEOUT = 180;
 // Limits that keep the shared state small (real parties are 480 bytes, turns about 20, and each side
-// collects its queue every second): a battle nobody has polled for 10 minutes is dropped. The state is
+// collects its queue every second): a battle neither side has polled for 10 minutes is dropped. The state is
 // one D1 row that every poll rewrites, so the number of players waiting and battling is capped too
 // (the longest-idle go first), as is what can be queued for one player: a party and a few turns. The
 // queue budget is in JSON characters, since that's what the row holds (a control byte takes six).
@@ -42,7 +49,7 @@ const MAX_MATCHES = 100; // players in battles: 50 battles, at most about 450 KB
 const MAX_FIELD: Record<string, number> = { id: 16, name: 64, lvl: 8, pass: 32 };
 
 interface Info { id: string; name: string; lvl: string; pass: string; seen: number }
-interface Match { opp: string; info: Info; seed: number; side: number; inbox: string[]; turns: string[]; announced?: boolean; ended?: boolean; seen?: number }
+interface Match { opp: string; info: Info; seed: number; side: number; inbox: string[]; turns: string[]; announced?: boolean; made?: number; seen?: number }
 interface State { waiting: Record<string, Info>; matches: Record<string, Match> }
 
 const BLANK_ID = '00000000';
@@ -54,7 +61,17 @@ function customerId(): string {
 }
 
 const keyOf = (h: Record<string, string>) => JSON.stringify([h['x-swan-mtch-id'] ?? '', h['x-swan-mtch-name'] ?? '']);
-const poll = () => ({ 'X-SWAN-MTCH-POLINT': String(POLL), 'X-SWAN-MTCH-TIMEOUT': String(TIMEOUT) });
+const poll = (timeout = TIMEOUT) => ({ 'X-SWAN-MTCH-POLINT': String(POLL), 'X-SWAN-MTCH-TIMEOUT': String(timeout) });
+
+/** The other side's entry while it is still in this battle. A player who went back to the search (and
+ * maybe into another battle) no longer points here. */
+function partner(state: State, me: string, m: Match | undefined): Match | undefined {
+  const o = m ? state.matches[m.opp] : undefined;
+  return o && o.opp === me ? o : undefined;
+}
+
+/** When either side of a battle last asked: the player whose turn it is sends nothing while thinking. */
+const lastSeen = (state: State, k: string, m: Match) => Math.max(m.seen ?? 0, partner(state, k, m)?.seen ?? 0);
 
 function matched(m: Match): Record<string, string> {
   const o = m.info;
@@ -70,25 +87,43 @@ function matched(m: Match): Record<string, string> {
 const fits = (h: Record<string, string>) => Object.entries(MAX_FIELD).every(([k, n]) => (h[`x-swan-mtch-${k}`] ?? '').length <= n);
 
 /** Drop the entries that have gone longest without a poll until at most `max` are left. */
-function keepNewest<T>(entries: Record<string, T>, max: number, seen: (v: T) => number, drop: (key: string) => void) {
+function keepNewest<T>(entries: Record<string, T>, max: number, seen: (v: T, key: string) => number, drop: (key: string) => void) {
   const keys = Object.keys(entries);
   if (keys.length <= max) return;
-  for (const k of keys.sort((a, b) => seen(entries[a]) - seen(entries[b])).slice(0, keys.length - max)) drop(k);
+  const at = new Map(keys.map((k) => [k, seen(entries[k], k)]));
+  for (const k of keys.sort((a, b) => at.get(a)! - at.get(b)!).slice(0, keys.length - max)) drop(k);
 }
 
 const queued = (m: Match) => JSON.stringify(m.inbox).length + JSON.stringify(m.turns).length;
+
+/** Drop players who stopped searching, and battles that neither side has polled for a while. */
+function prune(state: State, now: number) {
+  for (const [k, w] of Object.entries(state.waiting)) if (now - w.seen > STALE) delete state.waiting[k];
+  const idle = Object.entries(state.matches).filter(([k, m]) => now - lastSeen(state, k, m) > MATCH_IDLE);
+  for (const [k] of idle) delete state.matches[k];
+}
 
 function reqmatch(state: State, h: Record<string, string>): [Record<string, string>, string] {
   const me = keyOf(h);
   if (!fits(h)) return [{ 'X-SWAN-MTCH-RETCD': '9' }, `reqmatch: refused (header too long)`];
   const now = Date.now() / 1000;
+  prune(state, now);
   const m = state.matches[me];
   if (m && !m.announced) {
-    m.announced = true;
-    return [matched(m), `reqmatch ${me}: matched with ${m.opp}`];
+    // A pair is made when the second player arrives, but the search sends nothing when it ends (it runs out
+    // after TIMEOUT, or the cart is switched off), so the one who was waiting may be gone. They hear first,
+    // on their next poll; the newcomer hears once they have, and looks again if they never do. While the
+    // newcomer waits for that its polls change nothing, so they cost no write.
+    const opp = partner(state, me, m);
+    const fresh = opp !== undefined && now - ((opp.announced ? opp.seen : m.made) ?? 0) <= STALE;
+    if (opp && fresh && (m.side === 0 || opp.announced)) {
+      m.announced = true;
+      m.seen = now;
+      return [matched(m), `reqmatch ${me}: matched with ${m.opp}`];
+    }
+    if (fresh) return [{ 'X-SWAN-MTCH-RETCD': '1', ...poll() }, `reqmatch ${me}: found ${m.opp}, who hasn't answered yet`];
   }
   delete state.matches[me];
-  for (const [k, w] of Object.entries(state.waiting)) if (now - w.seen > STALE) delete state.waiting[k];
   const pw = h['x-swan-mtch-pass'] ?? '';
   const other = Object.keys(state.waiting).find((k) => k !== me && state.waiting[k].pass === pw);
   const [id, name] = JSON.parse(me) as [string, string];
@@ -103,35 +138,50 @@ function reqmatch(state: State, h: Record<string, string>): [Record<string, stri
   delete state.waiting[me];
   const seed = randomInt(0, 65536);
   // Room for two more: drop whole battles, longest-idle first.
-  keepNewest(state.matches, MAX_MATCHES - 2, (m) => m.seen ?? 0, (k) => {
-    if (state.matches[k]) delete state.matches[state.matches[k].opp];
+  keepNewest(state.matches, MAX_MATCHES - 2, (m, k) => lastSeen(state, k, m), (k) => {
+    if (partner(state, k, state.matches[k])) delete state.matches[state.matches[k].opp];
     delete state.matches[k];
   });
-  state.matches[other] = { opp: me, info: mine, seed, side: 0, inbox: [], turns: [], seen: now };
-  state.matches[me] = { opp: other, info: them, seed, side: 1, inbox: [], turns: [], announced: true, seen: now };
-  return [matched(state.matches[me]), `reqmatch ${me}: matched with ${other} (seed ${seed})`];
+  state.matches[other] = { opp: me, info: mine, seed, side: 0, inbox: [], turns: [], made: now, seen: now };
+  state.matches[me] = { opp: other, info: them, seed, side: 1, inbox: [], turns: [], made: now, seen: now };
+  return [{ 'X-SWAN-MTCH-RETCD': '1', ...poll() }, `reqmatch ${me}: found ${other} (seed ${seed}), who hasn't answered yet`];
 }
 
 function match(state: State, h: Record<string, string>, body: string): [Record<string, string>, string, string] {
   const me = keyOf(h);
   const cmd = h['x-swan-mtch-cmd'] ?? '';
-  const m = state.matches[me];
-  const opp = m ? state.matches[m.opp] : undefined;
+  const gone: [Record<string, string>, string, string] = [{ 'X-SWAN-MTCH-RETCD': '9' }, '', `match ${me} cmd ${cmd}: no match`];
+  let m: Match | undefined = state.matches[me];
+  if (m && !m.announced) m = undefined;
+  const opp = partner(state, me, m);
   if (cmd === '4') {
-    // The battle is over on this cart (5900:3A60, sent from the end-of-battle controller and repeated every
-    // POLINT until the answer is 6; 9 is an error). The other side may still be collecting the last turn, so
-    // the battle is dropped once both have said so.
+    // Only the winner's cart sends this, when the battle is decided (the end-of-battle controller at ROM
+    // 0x35E516 calls 5900:3A60 when the result byte at SRAM 0x4A0A is 0xFD; the loser and both sides of a
+    // draw just hang up). It asks again every POLINT until the answer is 6; 9 is an error. The battle is over
+    // for the sender; the loser keeps its side only while the last turn is still waiting to be collected.
     if (m) {
-      m.ended = true;
-      if (!opp || opp.ended) {
-        delete state.matches[m.opp];
-        delete state.matches[me];
-      }
+      delete state.matches[me];
+      if (opp && !opp.turns.length) delete state.matches[m.opp];
     }
     return [{ 'X-SWAN-MTCH-RETCD': '6', ...poll() }, '', `match ${me} cmd 4: battle over`];
   }
-  if (!m || !opp) return [{ 'X-SWAN-MTCH-RETCD': '9' }, '', `match ${me} cmd ${cmd}: no match`];
+  if (!m) return gone;
   m.seen = Date.now() / 1000;
+  if (cmd === '1' && m.inbox.length) {
+    const data = m.inbox.shift()!;
+    return [{ 'X-SWAN-MTCH-RETCD': '2', ...poll(TURN_TIMEOUT) }, data, `match ${me} cmd 1: delivered ${data.length} bytes`];
+  }
+  if (cmd === '3' && m.turns.length) {
+    const data = m.turns.shift()!;
+    if (!opp && !m.turns.length) delete state.matches[me];
+    return [{ 'X-SWAN-MTCH-RETCD': '5', ...poll(TURN_TIMEOUT) }, data, `match ${me} cmd 3: turn delivered (${data.length} bytes)`];
+  }
+  if (!opp) {
+    // The other player left this battle (gave up waiting and searched again, or won and said so) and there is
+    // nothing left to collect: tell this cart now, not after TIMEOUT.
+    delete state.matches[me];
+    return gone;
+  }
   if (
     (cmd === '0' || cmd === '2') &&
     (body.length > MAX_POST || (cmd === '0' ? opp.inbox : opp.turns).length >= MAX_QUEUE || queued(opp) + JSON.stringify(body).length > MAX_QUEUED)
@@ -142,31 +192,13 @@ function match(state: State, h: Record<string, string>, body: string): [Record<s
     opp.inbox.push(body);
     return [{ 'X-SWAN-MTCH-RETCD': '0', ...poll() }, '', `match ${me} cmd 0: posted ${body.length} bytes`];
   }
-  if (cmd === '1') {
-    if (m.inbox.length) {
-      const data = m.inbox.shift()!;
-      return [{ 'X-SWAN-MTCH-RETCD': '2', ...poll() }, data, `match ${me} cmd 1: delivered ${data.length} bytes`];
-    }
-    return [{ 'X-SWAN-MTCH-RETCD': '1', ...poll() }, '', `match ${me} cmd 1: nothing yet`];
-  }
+  if (cmd === '1') return [{ 'X-SWAN-MTCH-RETCD': '1', ...poll() }, '', `match ${me} cmd 1: nothing yet`];
   if (cmd === '2') {
     opp.turns.push(body);
-    return [{ 'X-SWAN-MTCH-RETCD': '3', ...poll() }, '', `match ${me} cmd 2: turn posted (${body.length} bytes)`];
+    return [{ 'X-SWAN-MTCH-RETCD': '3', ...poll(TURN_TIMEOUT) }, '', `match ${me} cmd 2: turn posted (${body.length} bytes)`];
   }
-  if (cmd === '3') {
-    if (m.turns.length) {
-      const data = m.turns.shift()!;
-      return [{ 'X-SWAN-MTCH-RETCD': '5', ...poll() }, data, `match ${me} cmd 3: turn delivered (${data.length} bytes)`];
-    }
-    return [{ 'X-SWAN-MTCH-RETCD': '4', ...poll() }, '', `match ${me} cmd 3: nothing yet`];
-  }
+  if (cmd === '3') return [{ 'X-SWAN-MTCH-RETCD': '4', ...poll(TURN_TIMEOUT) }, '', `match ${me} cmd 3: nothing yet`];
   return [{ 'X-SWAN-MTCH-RETCD': '9' }, '', `match ${me}: unknown cmd ${cmd}`];
-}
-
-/** Drop battles that neither side has polled for a while (abandoned mid-battle). */
-function prune(state: State) {
-  const now = Date.now() / 1000;
-  for (const [k, m] of Object.entries(state.matches)) if (now - (m.seen ?? 0) > MATCH_IDLE) delete state.matches[k];
 }
 
 // ---------- mercenaries and the world market ----------
@@ -509,7 +541,7 @@ export async function handle(conn: Conn, path: string, headers: Record<string, s
   let data: Uint8Array | string = '';
   let note: string;
   if (name === 'nph-reqmatch.cgi') {
-    [h, note] = await withState(conn, 'darkeyes', fresh, (state) => (prune(state), reqmatch(state, headers)));
+    [h, note] = await withState(conn, 'darkeyes', fresh, (state) => reqmatch(state, headers));
   } else if (name === 'nph-match.cgi') {
     [h, data, note] = await withState(conn, 'darkeyes', fresh, (state) => match(state, headers, latin1(raw)));
   } else if (Object.hasOwn(WORLD, name)) {

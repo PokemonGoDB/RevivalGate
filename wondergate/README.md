@@ -9,7 +9,7 @@ host/      wgcore-host: the adapter on a PC (Mednafen stdio, or a dongle's seria
 server/    wgserver.py: game server (routes by original hostname, logs every request)
            swan_ranking.py: Bandai national rankings (7 games, per-game formats)
            charge.py: Bandai charge service (X-SWAN-* headers; in progress)
-emu/       headless emulator: build_core.sh, drive.py, regress.py (+ replays.txt),
+emu/       headless emulator: build_core.sh, drive.py, regress.py (+ replays.txt, checks.txt, seeds/),
            watchrange.py / findreaders.py (find a game's reply parser)
 tools/     play.sh, test_core.py, test_raku.py, rom_strings.py, mednafen-adapter.sh;
            blesim/: the Mac as a Bluetooth module (CoreBluetooth peripheral)
@@ -21,8 +21,10 @@ dev.conf   adapter config for local dev
 
 ```bash
 emu/build_core.sh          # once: headless core with our adapter on its serial port
-tools/serve.sh             # dev game server
-emu/regress.py             # replay every working game (emu/replays.txt) and check the session
+tools/serve.sh             # dev game server (for drive.py and play.sh)
+emu/regress.py             # replay every working game (emu/replays.txt) against its own fresh server copy
+emu/regress.py --bless KEY # after a look at runs/regress/KEY.png: record that screen in emu/checks.txt
+emu/regress.py --fault     # corrupt every HTTP reply: shows which replays would notice a bad reply
 emu/drive.py "raku jongg" w600 RIGHT RIGHT RIGHT RIGHT A w180 DOWN DOWN A w120 A w1500 s:result
 ```
 

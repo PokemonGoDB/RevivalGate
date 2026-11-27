@@ -4,8 +4,11 @@ Ring Infinity: wgg02 /ring/cgi-bin/accsess.cgi?RING=666.
 
 Ring Infinity only needs the connection to succeed: it reads 7 lines (status and
 headers, contents ignored) and one block, then picks the hint mail itself from
-story progress and chance (ROM 0x34C47C). A reply shorter than 7 lines would
-leave it waiting for the server to hang up, so we send 7 lines and close.
+story progress and chance (ROM 0x34C47C). It doesn't check what those reads
+returned (ROM 0x34C8B9), so any reply counts. Terrors 2 uses the same reader and
+takes its clock from the 8th read, so the reply has to be exactly 7 lines and
+then the body. Every line and the body must stay under 127 bytes: the 127th
+byte of a read lands on the library's socket number. docs/wondergate/ring-terrors.md.
 """
 import datetime
 import os

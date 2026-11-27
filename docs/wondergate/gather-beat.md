@@ -179,7 +179,7 @@ Choices where the list is ambiguous:
   the entries' own prices).
 - The downloaded list replaces it: `A000:A44D` writes 5-byte entries after a count word at SRAM
   `0x4082`. The shop (`A000:88E1`) sorts by kind, then HP, and prints the entry's price.
-- A 683-byte body parsed; a 1003-byte one failed with error 6 ("データの読み込みに失敗"). Our list is 283 bytes.
+- The body may be at most 959 bytes (limits below). Our list is 283 bytes.
 
 ## Check your cartridge
 
@@ -221,6 +221,40 @@ ends the list.
 **GB2** `GET /download/ggene_gb/gggbgate2.txt`. Parser at ROM `0x7AEF00` (`AC08:2F00`), body
 in RAM `0xE000`. Same `T III VVVV` lines, grouped: all type-1 lines (units) first, then 2 (parts),
 3 (pilots), 4 (scenarios). Any other first character ends the parse.
+
+## Reader limits (tested in the games, 2026-11-26)
+
+Both lists are fixed text: nothing in them depends on the date, so there is no month or year
+rollover to get wrong. Test lists were served to the real games in place of ours.
+
+**GB1**
+
+- **Size:** a 959-byte body is read and parsed; with `Content-Length: 960` or more the game doesn't
+  read the body at all and the download fails (back to the phone number screen). With plain 10-byte
+  lines that is 95 entries.
+- **Count:** the parser doesn't count. A 90-entry list (903 bytes) gave count `5A 00` at SRAM
+  `0x4082` and the shop scrolled through it to the end. Bandai's longest known list had 29.
+- **Lines:** only the 8 digits matter. Text after them is skipped to the end of the line (tried with
+  600 extra characters on one line), lines that don't parse are skipped, a bare LF ends a line as
+  well as CRLF, and without the closing `0` line the list ends at the end of the body.
+- **Proof it took our list:** SRAM `0x4082` = `1C 00` (28 entries), then 5-byte entries (kind, id,
+  `FF`, price). After a corrupted reply the count is `00 00` and the shop is empty.
+
+**GB2**
+
+- **Lines are rigid:** `T`, 3 digits, 4 digits, then an optional CR and an optional LF. Any other
+  character ends the whole list: with a space after the second line only two entries were taken.
+  A bare LF works. A type that comes out of order is dropped with everything after it.
+- **Count:** no check. Ids go one byte each from RAM `0x404`, prices one word each from RAM `0x202`,
+  so the 258th price lands on the first id (read from the code). 256 lines parsed and the shop
+  scrolled through them; with 300 the names shown were wrong. Ours has 19.
+- **Size:** a 3,000-byte body was read in full.
+- An empty body gives an empty shop, not an error.
+- **Proof it took our list:** RAM `0x404` = `35 94 8A 58 59 A7 72 A8 A9 AA 09 0A 0F 19 4B 6F 72 00 01`
+  (the 19 ids; scenarios are stored as id − 1), prices from RAM `0x202` (`B0 04` = 1200 first).
+  After a corrupted reply both are zero.
+
+Both replays end on the shop itself, so their last screen shows the list (empty after a bad reply).
 
 ## Verified (headless, real game code)
 

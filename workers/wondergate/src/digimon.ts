@@ -2,8 +2,9 @@
 //   D1 Tamers (2000), the net D-1 Grand Prix:  POST http://digi4.wgg.channel.or.jp/cgi-bin/dm4<name>.cgi
 //   Brave Tamer (2001):                        POST http://digi_b.wgg.channel.or.jp/cgi-bin/dmB<name>.cgi
 // profile (26 bytes) ID[8] name[8] region party-size digimon-id[3] word; block = profile + 3 Digimon
-// records (D1 Tamers 39 bytes each, Brave Tamer 55). The battles run in the cartridge; the server keeps
-// the ladder (the stronger party moves up). Each game keeps its own players and ladder.
+// records (D1 Tamers 39 bytes each, Brave Tamer 55). The battles run in the cartridge and their result is
+// never sent back, so the server keeps the ladder by a guess (the stronger party moves up); the WIN/LOSE
+// on screen can disagree. Each game keeps its own players and ladder.
 import { DIGIMON_FONTS, type DigimonFont } from '../../../src/data/digimon-text';
 import { isOffensive } from '../../../src/lib/wordfilter';
 import { concat, hex, jst, randomInt, unhex } from './bytes';
@@ -67,7 +68,7 @@ const SIGNUPS_PER_DAY = 20;
 
 /** Make room for one more tamer. */
 function evict(db: Db) {
-  const kept = new Set([...(db.hall ?? []).map((h) => h.id), db.leader]);
+  const kept = new Set([...(db.hall ?? []).map((h) => h.id), db.ranking[0]]);
   while (Object.keys(db.players).length >= MAX_PLAYERS) {
     const ranked = new Set(db.ranking);
     const idle = Object.keys(db.players)
@@ -96,7 +97,7 @@ interface Db {
   next_id: number;
   /** Brave Tamer's hall of fame, oldest first */
   hall?: Array<{ id: string; week: string | null }>;
-  leader?: string;
+  /** the week of the last request (ISO week); a new one enshrines the leader */
   leader_week?: string;
 }
 
@@ -143,21 +144,26 @@ export function isoWeek(t = jst()): string {
   return `${year}-W${String(week).padStart(2, '0')}`;
 }
 
-/** Brave Tamer's hall of fame (でんどう): each week's ladder leader is enshrined. Bandai's list is lost;
- * ours starts empty and fills week by week. The current leader is shown too, so the list is never empty
- * once someone is ranked. Newest first, at most 8 (the reply's size). */
-function hallOfFame(db: Db): string[] {
+/** Brave Tamer's hall of fame (でんどう): each week's ladder leader is enshrined. When a new week starts,
+ * whoever leads the ladder goes into the hall for the week that ended. This runs on every Brave Tamer
+ * request, before the ladder can change, so the leader is recorded even if nobody opened the hall that
+ * week. (Until 2026-11-26 it ran only when someone opened the hall, and recorded whoever led at the
+ * previous opening.) */
+function newWeek(db: Db) {
   const week = isoWeek();
-  const hall = (db.hall ??= []);
+  if (db.leader_week === week) return;
+  if (db.ranking.length && db.leader_week) (db.hall ??= []).push({ id: db.ranking[0], week: db.leader_week });
+  db.leader_week = week;
+}
+
+/** The hall's list. Bandai's is lost; ours starts empty and fills week by week (newWeek). The current
+ * leader is shown too, so the list is never empty once someone is ranked. Newest first, at most 8 (the
+ * reply's size). */
+function hallOfFame(db: Db): string[] {
   const ladder = db.ranking;
-  if (ladder.length && db.leader_week !== week) {
-    // A new week: last week's standing leader goes into the hall.
-    if (db.leader && Object.hasOwn(db.players, db.leader)) hall.push({ id: db.leader, week: db.leader_week ?? null });
-    db.leader_week = week;
-  }
-  if (ladder.length) db.leader = ladder[0];
   const ids = ladder.length ? [ladder[0]] : [];
-  for (const h of [...hall].reverse()) if (!ids.includes(h.id) && db.players[h.id]?.block) ids.push(h.id);
+  // oldest first in the data
+  for (const h of [...(db.hall ?? [])].reverse()) if (!ids.includes(h.id) && db.players[h.id]?.block) ids.push(h.id);
   return ids.slice(0, 8);
 }
 
@@ -195,6 +201,7 @@ export async function handle(conn: Conn, path: string, body: Uint8Array): Promis
   }
 
   return withState<Db, Reply>(conn, game.key, fresh, (db) => {
+    if (game.prefix === 'dmB') newWeek(db);
     const players = db.players;
     if (name === 'signup.cgi' && body.length >= 9) {
       const handleName = hex(body.subarray(0, 8));

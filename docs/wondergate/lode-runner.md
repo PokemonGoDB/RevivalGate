@@ -273,6 +273,48 @@ directory doesn't exist, so the list request gets 404 and the game says 「デ�
   built-in map 0 was refused with 409 and the same map with three tiles changed was queued.
   The receiving side's code is read from the ROM, not run against a second console.
 
+## Reader limits (tested in the game, 2026-11-26)
+
+With a synthetic test set served through `WG_STATIC_CONTENT` (a border, a floor and one gold per
+stage; no built-in maps), kept outside the repo:
+
+**The list**
+
+- 55 valid lines were sent: the game kept the first 50 (RAM `0x1000`–`0x131F`) and left the bytes
+  after the table alone. UP from No. 01 wraps to No. 50.
+- A 12-character name (`STAGE050.MAP`) fills its field with no terminator and is still requested
+  correctly. A 13-character name is dropped; so is an empty one. A 1-character name works, and
+  leading spaces are skipped.
+- Dates: year 9999 shows as `99`, year 1 as `01`. Year 0 and 10000, month 13, day 0 and day 32 are
+  dropped. Day 29 of February is kept (no month lengths). `NAME,2000/2/29` works; without the comma
+  after the name the line is dropped.
+- **A line longer than 127 bytes becomes two lines.** The adapter hands over the first 127 bytes and
+  the rest is parsed as a line of its own: a 159-byte line with a second `NAME,y,m,d` at its end
+  gave two entries. A line of exactly 127 bytes with its CRLF is fine.
+- Line ends: the first bare-LF line was kept, the one after it and a last line with no line end
+  were dropped. Use CRLF on every line, including the last.
+- An empty file gives error 604.
+- The line buffer is the editor's work buffer (RAM `0x1600`), so it holds the last list line until
+  a stage arrives.
+
+**A stage**
+
+| File | Result |
+|---|---|
+| 504 bytes, tiles ≤ `0x1E` (also the 50th entry, and one with a `0x1E` tile) | opens in the editor; grid at RAM `0x1600`, `[0x589]` = 28, `[0x58A]` = 18 |
+| not on the server (404) | error 601 |
+| 503 bytes | error 602 |
+| 505 bytes | error 602 |
+| 504 bytes with one `0x1F` | error 602 (the bytes are in RAM `0x1600` but the editor doesn't open) |
+
+**Proof in memory:** RAM `0x7D9` holds the error code and `0x7DB` the HTTP status, both words. The
+closed service gives `5B 02 94 01` (603, 404); an empty list `5C 02 C8 00` (604, 200); a list that
+parsed leaves the code `00 00`.
+
+**Link cable:** nothing the server answers reaches the game. With the upload's reply corrupted the
+game's memory and screen were the same as with a good one; the only proof of the upload is the
+adapter's log line (`stage queued <id>`) and the queue file.
+
 ## Open
 
 - **Decision:** whether to offer new stages, and how. They must be labelled as fan-made, but the

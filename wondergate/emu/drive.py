@@ -24,6 +24,10 @@ Steps, run in order:
     ram:ADDR=VAL    set a console RAM byte (ADDR, VAL hex), e.g. to jump to a game mode
                 through a save-state round trip; marks the run debug_injected.
                 Stands in for game progress a feature needs.
+    expect:ADDR=HEX   check memory without changing it: the bytes at CPU address ADDR (0-FFFF is
+                console RAM, 10000-1FFFF the cartridge's SRAM) must be HEX; expect:ADDR!=HEX
+                that they aren't. A failed check is reported, the remaining steps still run,
+                and the exit code is 3.
 
 Output defaults to runs/<game>/ ; the adapter trace goes to OUT/adapter.log.
 Make sure the server is running (tools/serve.sh).
@@ -143,6 +147,7 @@ def main():
     with Client(core=CORE) as ws:
         ws.call("rom.load", path=str(rom), profile="none")
         frame = 0
+        failed = 0
 
         def run(n, buttons):
             """Run exactly n whole frames; `run` stops early on its instruction budget."""
@@ -190,8 +195,16 @@ def main():
                 run(1, [])
             elif step.startswith("load:"):
                 ws.call("state.load", path=str(out / f"{step[5:]}.state"))
+            elif step.startswith("expect:"):
+                addr, differs, want = re.fullmatch(r"([0-9A-Fa-f]+)(!?)=((?:[0-9A-Fa-f]{2})+)", step[7:]).groups()
+                got = ws.call("mem.read", address=int(addr, 16), size=len(want) // 2)["hex"]
+                if (got == want.lower()) == bool(differs):
+                    print(f"frame {frame}: check failed: {addr} holds {got}, expected {'anything but ' if differs else ''}{want.lower()}")
+                    failed += 1
             else:
                 sys.exit(f"unknown step {step!r}")
+        if failed:
+            sys.exit(3)
 
 
 if __name__ == "__main__":

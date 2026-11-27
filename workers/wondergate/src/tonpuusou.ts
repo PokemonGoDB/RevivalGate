@@ -17,6 +17,11 @@ import { quota, writeAllowed } from './limits';
 import { withState } from './state';
 
 const START_RATE = 150000;
+// What the cart takes back (parser 0xA2C30, range check A000:3866; both tried in the game): R2500 or more is
+// refused ("レートのあたいがいじょうです") at every download, so that ID could never play again; a rate with
+// fewer than three digits isn't read (the cart reads stray RAM in its place); the game count is a 16-bit word.
+const RATE_MAX = 249999;
+const GAMES_MAX = 0xffff;
 const MAX_ID = 16;
 const MAX_PASSWORD = 32;
 const MAX_G = 8;
@@ -32,11 +37,15 @@ interface Player { id: string; password_hash: string; rate: number; games: numbe
 
 function reply(ok: number, p: Player | null, note: string): Reply {
   let body = `c=${ok}\r\n`;
-  if (p) body += `e=${p.rate}\r\nf=${p.games}\r\n`;
+  if (p) body += `e=${String(Math.min(p.rate, RATE_MAX)).padStart(3, '0')}\r\nf=${Math.min(p.games, GAMES_MAX)}\r\n`;
   return { status: 200, type: 'text/plain', body, note };
 }
 
 const KINDS = 15; // yakuman kinds the cart counts and uploads
+// The ranking screen draws a kind's count with three digits and the total's with four, and drops the digits
+// above them (1000 reads as 0, 65535 as 535; seen in the game), so rows stop there.
+const SHOWN = 999;
+const SHOWN_TOTAL = 9999;
 // The ranking is one D1 row (state.ts): about 130 bytes a player, so this many stay well under its limit. Past
 // it, the player with the fewest yakuman goes.
 const MAX_YAKUMAN_PLAYERS = 3000;
@@ -87,7 +96,7 @@ async function yakuman(conn: Conn, raw: Uint8Array): Promise<Reply> {
       lines++;
       if (!top.length) continue;
       line(` BEST3=${top.length}`);
-      top.forEach((p, r) => line(` ${r + 1}|${five(Math.min(count(p), 0xffff))}|`, p.owner));
+      top.forEach((p, r) => line(` ${r + 1}|${five(Math.min(count(p), table ? SHOWN : SHOWN_TOTAL))}|`, p.owner));
       lines += 1 + top.length;
     }
     const size = out.reduce((n, b) => n + b.length, 0);
@@ -110,7 +119,8 @@ export async function handle(conn: Conn, path: string, raw: Uint8Array): Promise
   const pw = form.d ?? '';
   if (!pid) return reply(0, null, `tonpuusou ${path}: no ID`);
 
-  // The cart's ID is 4 characters, its password 5 and g one digit: anything much longer isn't a player.
+  // The cart's keypad takes an ID of up to 8 digits and a password of up to 12 letters and digits, and g is
+  // at most 5 digits: anything much longer isn't a player.
   if (pid.length > MAX_ID || pw.length > MAX_PASSWORD || (form.g ?? '').length > MAX_G) return reply(0, null, `tonpuusou ${path}: field too long`);
 
   const db = conn.env.WG_DB;

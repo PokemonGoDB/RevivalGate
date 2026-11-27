@@ -93,3 +93,13 @@ the end headless.
 - Offline replay with the flag set (`poke:5E=1`, いいえ): story plays, no dial in the trace.
 - Not verified: clearing the game by normal play to check that the ending writes the record (read
   from the code above).
+
+## Checked again (2026-11-26)
+
+- No request reaches the server, so there is no reply to get wrong; the game only needs the dial
+  to go through.
+- Proof in the save that the dial was accepted: SRAM `0x5E` (Sayla's story flag). It is `00` at the
+  dial pad and at 「接続するわね。よくって？」, and `01` after the dial. Answering いいえ there dials
+  nothing, returns to the title and leaves it `00`.
+- Not verified: a dial that fails (state 0x13). Our adapter always answers the dial, and its signal
+  setting makes no difference to this game (tried `reception 0`).

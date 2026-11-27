@@ -1,6 +1,8 @@
-// BPL (port 5555): the MobileWonderGate browser asks whether a URL is allowed.
+// BPL (port 5555): the MobileWonderGate browser asks this server about every URL before opening it.
 // 24-byte header, little-endian type at 2 and total size at 4. We echo the request header with
-// type 0x0010 (allow, no blocks). A port of wgserver.bpl_conn.
+// type 0x0010 and no body: the cart then fetches the page itself over HTTP. Its reader (cart ROM
+// 0x1E8A5B) also takes pages drawn by the server and games through this port; nothing we serve
+// needs those (docs/wondergate/mobilewondergate.md). A port of wgserver.bpl_conn.
 import { concat } from './bytes';
 import type { Conn } from './env';
 

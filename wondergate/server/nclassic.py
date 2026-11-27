@@ -39,8 +39,9 @@ SIZES = [0x1F, 0x16, 0x0E, 0x0E, 0x12, 0x111, 0xCC, 0x14, 0x26, 0x14, 0x2E, 0x45
 
 def bulletin(size, today=None):
     """Type 6: this month's Net Tour round (body after WSD\\r): round number
-    (word +0), qualifier cutoff rank (word +6), entry fee in yen (word +10),
-    start and end dates as yyyymmdd text (+168, +176; shown as yy/mm/dd), course id (+0x96)."""
+    (word +0), stage (word +4, see stage_word), qualifier cutoff rank (word +6),
+    entry fee in yen (word +10), start and end dates as yyyymmdd text (+168, +176;
+    shown as yy/mm/dd), course id (+0x96)."""
     import calendar
     import datetime
     today = today or datetime.date.today()
@@ -48,6 +49,7 @@ def bulletin(size, today=None):
     rnd = tour_round(today)
     last = calendar.monthrange(today.year, today.month)[1]
     body[0:2] = rnd.to_bytes(2, "little")
+    body[4:6] = stage_word(today).to_bytes(2, "little")
     body[6:8] = (100).to_bytes(2, "little")
     body[10:12] = (0).to_bytes(2, "little")
     body[168:176] = today.strftime("%Y%m01").encode()
@@ -81,16 +83,35 @@ def new_product(day=None):
     return bytes.fromhex(PRODUCTS[(tour_round(day) - 1) % len(PRODUCTS)])
 
 
+def tour_week(day):
+    """Week of the month's tour: 0 on the days before the first Monday, then 1, 2, ...
+    from each Monday (up to 5)."""
+    import datetime
+    monday = day - datetime.timedelta(days=day.weekday())
+    return max(0, (monday - day.replace(day=1)).days // 7 + 1)
+
+
+def stage_word(day):
+    """Word +4 of the bulletin and of the round. The cart saves it with the round and
+    downloads a round again only when the bulletin's round or this word differs from the
+    saved ones (6000:1946; otherwise あたらしい データは ありませんでした 708), so it has
+    to change whenever the conditions do: every Monday. The cart reads it as signed:
+    below 4 is the qualifier, 4 is the final (the cart then asks types 10, 11 and 12,
+    which we don't serve: see the doc) and above 4 is refused (errors 704/705). So
+    weeks 0-3 go out as they are and weeks 4 and 5 as -1 and -2: still the qualifier
+    to the cart. The values are ours; what Bandai sent is not known."""
+    week = tour_week(day)
+    return week if week < 4 else (3 - week) & 0xFFFF
+
+
 def week_conditions(day):
     """This week's weather and wind for the 18 holes, as the manual describes the
     Net Tour: they change every Monday, and the final (from the round's fourth
     Monday) is played in harder conditions. Fixed per week (SHA-256 of the month
     and week, so the Worker port gives the same bytes), so every player gets the
     same round. Returns (rain, wind strength in m, wind direction) per hole."""
-    import datetime
     import hashlib
-    monday = day - datetime.timedelta(days=day.weekday())
-    week = max(0, (monday - day.replace(day=1)).days // 7 + 1)   # 0 = days before the first Monday
+    week = tour_week(day)
     final = week >= 4
     seed = f"wclassic {day:%Y-%m} week {week}"
     a = hashlib.sha256((seed + " a").encode()).digest()
@@ -107,10 +128,12 @@ def net_round(size, day=None):
     """Type 5, the Net Tour round (parser 6000:4F8E, unpacked into the tour save
     at SRAM 0xACF). Body:
       +0     round (word; 0 = no tour: the game menu then has no ネットツアー)
-      +2..   5 words, then a word list from +0xC ending in 0, 8 words at +0xB2
+      +2..   5 words (+4 = stage, as in the bulletin: stage_word), then a word list
+             from +0xC ending in 0, 8 words at +0xB2
       +0xB2  start date, +0xBA end date, "yyyymmdd" text (the entry deadline)
       +0xC2  18 hole indexes, each a built-in course * 18 + hole (table 6000:50FE)
-      +0xD4  18 bits, MSB first: rain on that hole
+      +0xD4  rain: byte +0xD4 = holes 1-8, byte +0xD5 = holes 10-17, MSB first.
+             The parser takes 9 holes from each byte, so holes 9 and 18 are always dry
       +0xD7  18 nibbles, high first: wind strength in m (0-15)
       +0xE0  18 nibbles: wind direction, 16 steps of 22.5 deg clockwise from
              straight up the hole screen (the parser stores 1 << n)
@@ -123,13 +146,14 @@ def net_round(size, day=None):
     day = day or datetime.date.today()
     body = bytearray(size - 4)
     body[0:2] = tour_round(day).to_bytes(2, "little")
+    body[4:6] = stage_word(day).to_bytes(2, "little")
     last = calendar.monthrange(day.year, day.month)[1]
     body[0xB2:0xBA] = day.strftime("%Y%m01").encode()
     body[0xBA:0xC2] = day.replace(day=last).strftime("%Y%m%d").encode()
     rain, strength, direction = week_conditions(day)
     for h in range(18):
-        if rain[h]:
-            body[0xD4 + h // 8] |= 0x80 >> (h % 8)
+        if rain[h] and h % 9 < 8:                # holes 9 and 18 have no bit
+            body[0xD4 + h // 9] |= 0x80 >> (h % 9)
         shift = 0 if h % 2 else 4
         body[0xD7 + h // 2] |= strength[h] << shift
         body[0xE0 + h // 2] |= direction[h] << shift
@@ -210,6 +234,21 @@ def answer(req, session=None):
             save(db)
             log(f"WSC type 1 (register): new member {uid}")
             return reply(0, [b"WSD\r" + uid.encode() + b"PASSWORD"], size)
+        if kind == 2:
+            # メンバーズカードの変更: the card again, in type 1's layout. The cart
+            # needs one record back with 10 bytes (it compares them with its member
+            # ID but ignores the result; no record gives error 705). We send the ID.
+            # What Bandai sent is not known.
+            uid = session.get("user", "")
+            db = load()
+            issued = bool(__import__("re").fullmatch("WC[0-9]{8}", uid)) and 0 < int(uid[2:]) < db["next"]
+            if issued:
+                card = req[5:]
+                db["members"][uid] = {"handle": card[0:16].ljust(16, b"\0").hex(),
+                                      "pref": card[54] if len(card) > 54 else 0}
+                save(db)
+            log(f"WSC type 2 (card change): {uid}{'' if issued else ' (not a member ID of ours: not kept)'}")
+            return reply(0, [b"WSD\r" + uid.encode("latin-1")], size)
         if kind == 9:
             # Net Tour entry (after the type-4 clock): round(4), 2 bytes, score
             # (signed word, strokes over par). An empty reply completes it.
@@ -301,7 +340,9 @@ def answer(req, session=None):
                 body = b"\1\0" + shot["id"].to_bytes(4, "little") + handle[:16].ljust(16, b"\0") + bytes(1)
                 rows.append(b"WSD\r" + body)
             log(f"WSC type 16: {len(rows)} super shots")
-            return reply(0, rows, size)
+            # The cart needs at least one record (none gives error 705): with no
+            # shots, one zero record, which ends the list (データがありません).
+            return reply(0, rows or [b"WSD\r"], size)
         if kind == 15:
             # One super shot (params: its 4-byte ID): the uploaded header.
             sid = int.from_bytes(req[5:9], "little")

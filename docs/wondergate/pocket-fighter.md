@@ -17,12 +17,12 @@ srvcinfo (free, open until 2099), session, then the content request below.
 
 | Menu | Body | Reply body |
 |---|---|---|
-| upload score | `*=<customer id>&owner=<name 3 + fighter A-L>&score=01|<8 digits>` | `course=1|1|<entrants>|<top>|<yours>|<rank ≤50>` (rank 0 = not ranked) |
+| upload score | `*=<customer id>&owner=<name 3 + fighter A-L>&score=01|<8 digits>` | `course=1|1|<entrants>|<top>|<yours>|<rank>` (1-50 = ランクイン, anything else = ランクがい) |
 | upload points | `…&owner=<name 3 + fighter>&score=02|<8 digits>&score=<3 + fighter>|<8 digits>` | same course line (we answer with total points) |
 | download score | `…&group=1&list=ANSPF_SCORE|1|50` | course line + `ANSPF_SCORE=<k>` + `<rank>|<score>|<owner 4>|` rows |
 | download total points | `…&group=2&list=ANSPF_SCORE|1|50` | same, points table |
 | download per fighter | `…&owner=CAP<fighter>&group=<3 + fighter>&list=…` | same, that fighter's points table |
-| extras / cards | `…&group=0` | `info=` + 13 '1's: extras read the first 6 as flags (ROM `0x1CFB61`), cards skip 6 and read 7 (`0x1CFAFB`) |
+| extras / cards | `…&group=0` | `info=` + 13 flags, `1` = on: extras read the first 6 (ROM `0x1CFB61`), cards skip 6 and read 7 (`0x1CFAFB`). Which card flags are on differs between our two servers, see below |
 
 **Tables:** the number in an upload's `score=NN|` and a download's `group=` is the same table: 1
 score, 2 total points, 3-14 one fighter's points (3 + the fighter's number: Ryu 3 … Gouki 14). Menus:
@@ -58,3 +58,34 @@ although the select screen's name grid (ROM `0x10F14C`, two names per row) lists
 ポイントランキング), filled by the points upload's second `score=` (see Tables above). An earlier note
 here said they came from the score table filtered by the fighter letter; that was wrong, from
 captures that never held a points upload.
+
+## Digital cards: what the game does with the 7 flags (2026-11-26)
+
+The card download only ever adds to the set in the save (SRAM word `0x0F19`, one bit per card): for
+each `1` it sets that card's bit, and it never clears one. If the set grew it says あたらしいデジタル
+カードを にゅうしゅしました!!, otherwise あたらしいデジタルカードは ありませんでした。 Seen in the game:
+flags `0100000` took the save from `00` to `02`; `0000100` then made it `12`; the same reply again,
+and one with all flags off, said "no new cards" and left `12`; all seven on gives `7F`.
+
+So the game works with either way of serving cards, and our two servers differ on purpose:
+
+- the Python server turns all 7 on (one download gives every card);
+- the Worker turns on one card per day, Japan time, Monday the first, so the set fills over a week
+  of downloads. This was added to the Worker on 2026-10-15 so that a card download keeps meaning
+  something, and is listed under "Deliberate differences" in `docs/wondergate-server.md`;
+  `wg-conformance.mjs` masks the 7 flags.
+
+The six extras are on in both. Bandai's own schedule for the cards is not known.
+
+## Upload result and table size (2026-11-26)
+
+After an upload the game reads the rank from the course line: 1 to 50 gives 『ランクイン』 (you are in
+the national ranking), anything else (0, 51, 100, 9999, 65536 tried) gives 『ランクがい』 ベスト50がい
+です. The server used to cut the rank to 50, so a player in 61st place was told ランクイン; it now sends
+the real rank (up to 9999). Seen in the game with 49, 50 and 60 better scores seeded: ランクイン,
+ランクがい, ランクがい. A reply with no course line shows no result and goes straight to 『しゅうりょう』.
+
+A download of a full table says ダウンロードできたスコアは 50けんです, and OFFICIAL DATA → SCORE RANKING
+shows all 50 rows, five to a page, with 8-digit scores (`99999999` in first place).
+
+Not checked: names other than three letters, and the points tables at these sizes.

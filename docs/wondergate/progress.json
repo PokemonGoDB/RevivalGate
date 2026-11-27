@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-25",
+  "updated": "2026-11-26",
   "statuses": {
     "working": "Rebuilt on our servers and verified headless on the real game code by normal play.",
     "shortcut-verified": "Rebuilt and working, but verified by setting game state directly (RAM/SRAM pokes or a patched ROM copy) instead of reaching it by normal play.",
@@ -17,7 +17,8 @@
       "replays": [
         "mwgbrowser",
         "mwgmail",
-        "mwggame"
+        "mwggame",
+        "mwgsend"
       ],
       "features": [
         {
@@ -35,7 +36,7 @@
           "name": "Mail (receive and send)",
           "status": "working",
           "verified": "in-game",
-          "notes": "Mail only goes between WonderGate accounts on our server. It never reaches the internet."
+          "notes": "Mail only goes between WonderGate accounts on our server. It never reaches the internet. Checked between two cartridges."
         },
         {
           "name": "Game downloads (GAME menu)",
@@ -47,7 +48,8 @@
       "open": [
         "Label homebrew clearly: on the portal, on its own page, and on the game's title screen",
         "More homebrew games",
-        "Ask owners to check their cartridge's save memory (SRAM bank 7) for a game downloaded in 2001–2004"
+        "Ask owners to check their cartridge's save memory (SRAM bank 7) for a game downloaded in 2001–2004",
+        "The ゲームダウンロード factory bookmark gets no answer (the game download page in our portal works)"
       ]
     },
     {
@@ -55,7 +57,8 @@
       "title": "Raku Jongg",
       "doc": "docs/wondergate/raku-jongg.md",
       "replays": [
-        "rakujang"
+        "rakujang",
+        "rakuname"
       ],
       "features": [
         {
@@ -64,14 +67,17 @@
           "verified": "in-game"
         }
       ],
-      "open": []
+      "open": [
+        "A player who uses a different name in each of the three modes is shown as unranked in two of them: the game's table request only carries one name"
+      ]
     },
     {
       "id": "gunpeyex",
       "title": "GunPey EX",
       "doc": "docs/wondergate/gunpey-ex.md",
       "replays": [
-        "gunpeyex"
+        "gunpeyex",
+        "gunpeyscore"
       ],
       "features": [
         {
@@ -87,7 +93,8 @@
       "title": "Tare Panda no GunPey",
       "doc": "docs/wondergate/tare-panda.md",
       "replays": [
-        "tarepang"
+        "tarepang",
+        "tarepuzzle"
       ],
       "features": [
         {
@@ -103,7 +110,9 @@
       "title": "Another Heaven",
       "doc": "docs/wondergate/another-heaven.md",
       "replays": [
-        "heaven"
+        "heaven",
+        "heaven16",
+        "heavenfull"
       ],
       "features": [
         {
@@ -119,7 +128,8 @@
       "title": "D's Garage 21: Tane o Maku Tori",
       "doc": "docs/wondergate/ds-garage.md",
       "replays": [
-        "tanetori"
+        "tanetori",
+        "tanescore"
       ],
       "features": [
         {
@@ -129,14 +139,17 @@
           "notes": "Tested by playing a round of ずーっと 易 and connecting: the score went up and showed as the national best, with your rank."
         }
       ],
-      "open": []
+      "open": [
+        "Ranks past 2079th show as unranked: the game keeps only two digits of the rank and 2079 is the most our workaround can express"
+      ]
     },
     {
       "id": "sennou",
       "title": "Sennou Millennium",
       "doc": "docs/wondergate/sennou.md",
       "replays": [
-        "sennou"
+        "sennou",
+        "sennounames"
       ],
       "features": [
         {
@@ -152,7 +165,8 @@
       "title": "Final Lap 2000",
       "doc": "docs/wondergate/final-lap.md",
       "replays": [
-        "final-lap"
+        "final-lap",
+        "finallap1k"
       ],
       "features": [
         {
@@ -168,7 +182,9 @@
       "title": "Pocket Fighter",
       "doc": "docs/wondergate/pocket-fighter.md",
       "replays": [
-        "pocketf"
+        "pocketf",
+        "pfcards",
+        "pfrankout"
       ],
       "features": [
         {
@@ -180,7 +196,7 @@
           "name": "Paid extras and digital cards",
           "status": "working",
           "verified": "in-game",
-          "notes": "Everything is unlocked. The prepaid charge is simulated, so nothing is paid."
+          "notes": "Everything is unlocked, and the live server hands out one digital card a day. The prepaid charge is simulated, so nothing is paid."
         }
       ],
       "open": []
@@ -190,7 +206,8 @@
       "title": "Rainbow Islands: Putty's Party",
       "doc": "docs/wondergate/rainbow-islands.md",
       "replays": [
-        "rainbow"
+        "rainbow",
+        "rainbow-illust"
       ],
       "features": [
         {
@@ -240,7 +257,8 @@
       "title": "Buffers Evolution",
       "doc": "docs/wondergate/buffers-evolution.md",
       "replays": [
-        "buffers"
+        "buffers",
+        "buffers9999"
       ],
       "features": [
         {
@@ -257,7 +275,10 @@
       "doc": "docs/wondergate/tonpuusou.md",
       "replays": [
         "tonpuusou",
-        "tonyakuman"
+        "tonyakuman",
+        "tonyakufull",
+        "tonratecap",
+        "tonratelow"
       ],
       "features": [
         {
@@ -280,14 +301,16 @@
       ],
       "open": [
         "A Tonpuusou leaderboard on this site: rating and games played",
-                "Later, maybe: bring back the PC service"
+        "Later, maybe: bring back the PC service"
       ]
     },
     {
       "id": "gashapon",
       "title": "SD Gundam Gashapon Senki Episode 1",
       "doc": "docs/wondergate/gashapon-senki.md",
-      "replays": [],
+      "replays": [
+        "gashapon404"
+      ],
       "features": [
         {
           "name": "Map downloads",
@@ -334,7 +357,8 @@
       "title": "Pocket no Naka no Doraemon",
       "doc": "docs/wondergate/doraemon.md",
       "replays": [
-        "doraemon"
+        "doraemon",
+        "doraemon-nomail"
       ],
       "features": [
         {
@@ -377,7 +401,9 @@
           "notes": "Confirmed in the 黒い影 story, where the dialogue changes between morning and evening. We haven't seen the other two stories use the clock."
         }
       ],
-      "open": []
+      "open": [
+        "The clock is set wrong when the server takes more than two seconds to answer: our adapter doesn't yet wait as long as the game asks"
+      ]
     },
     {
       "id": "wizardry",
@@ -385,7 +411,8 @@
       "doc": "docs/wondergate/wizardry.md",
       "replays": [
         "wizardry",
-        "wizrank"
+        "wizrank",
+        "wizrank6"
       ],
       "features": [
         {
@@ -414,7 +441,11 @@
       "replays": [
         "d1tamers",
         "d1ranking",
-        "d1idbattle"
+        "d1idbattle",
+        "d1rankbtl",
+        "d1idbtl",
+        "d1rank12",
+        "d1idlist"
       ],
       "features": [
         {
@@ -436,7 +467,9 @@
           "notes": "Tested by switching the game straight into its WonderGate session, rather than through its menus."
         }
       ],
-      "open": []
+      "open": [
+        "Run the game's own battle on the server: the cartridge never reports who won, so the ladder follows our strength guess, which can disagree with the battle shown on screen"
+      ]
     },
     {
       "id": "darkeyes",
@@ -444,7 +477,8 @@
       "doc": "docs/wondergate/dark-eyes.md",
       "replays": [
         "darkeyes",
-        "demerc"
+        "demerc",
+        "deagain"
       ],
       "features": [
         {
@@ -467,7 +501,9 @@
         }
       ],
       "open": [
-        "Watch random-battle earnings change in the busiest or quietest region"
+        "Watch random-battle earnings change in the busiest or quietest region",
+        "Show each opponent's real win and loss record (we send 0 and 0)",
+        "If a turn's reply is lost on the way, the cartridge sends the turn again and the two sides fall out of step: turns carry no number, so the server can't tell a repeat from a new turn"
       ]
     },
     {
@@ -475,7 +511,8 @@
       "title": "Star Hearts",
       "doc": "docs/wondergate/star-hearts.md",
       "replays": [
-        "starhearts"
+        "starhearts",
+        "shvisitors"
       ],
       "features": [
         {
@@ -498,11 +535,19 @@
       "doc": "docs/wondergate/wonder-classic.md",
       "replays": [
         "wclassic",
-        "wcshot"
+        "wcshot",
+        "wccard",
+        "wcvtr0",
+        "wcentry"
       ],
       "features": [
         {
           "name": "Member card registration",
+          "status": "working",
+          "verified": "in-game"
+        },
+        {
+          "name": "Member card change",
           "status": "working",
           "verified": "in-game"
         },
@@ -585,7 +630,11 @@
       "replays": [
         "bravetamer",
         "braverank",
-        "bravehall"
+        "bravehall",
+        "braverankbtl",
+        "bravehallbtl",
+        "braverank8",
+        "bravehallweek"
       ],
       "features": [
         {
@@ -608,7 +657,8 @@
         }
       ],
       "open": [
-        "Reach the WonderGate with a real first partner (play or an owner's save) instead of the party poke"
+        "Reach the WonderGate with a real first partner (play or an owner's save) instead of the party poke",
+        "Run the game's own battle on the server: the cartridge never reports who won, so the ladder follows our strength guess, which can disagree with the battle shown on screen"
       ]
     },
     {

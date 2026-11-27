@@ -46,7 +46,9 @@ def ranks(store, course, code, name):
     for n, (p, o, score) in enumerate(rows):
         if (p, o) == (code, name):
             above = rows[n - 1][2] if n else score
-            return f"{n + 1:04d}"[-4:], rows[0][2], above
+            # Four digits is all there is: past 9999 the place stays 9999. (Its last four digits
+            # would read as another place: 10000 as no rank, 10001 as CHAMPION.)
+            return f"{min(n + 1, 9999):04d}", rows[0][2], above
     return None
 
 

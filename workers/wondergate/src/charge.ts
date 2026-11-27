@@ -59,6 +59,6 @@ export async function handle(conn: Conn, path: string, headers: Record<string, s
   }
   // nph-* ("non-parsed header") CGIs ended the connection when they finished, and games read the
   // reply until it closes: Rainbow Islands and Gundam Vol. 1 wait for that, Pocket Fighter gives up
-  // after 30 s. (The Python server keeps the connection open until its 60 s idle timeout.)
+  // after 30 s.
   return { status: 200, type: 'text/plain', body: '', note: `${name} srvc=${srvc}`, headers: h, hangUp: name.startsWith('nph-') };
 }
