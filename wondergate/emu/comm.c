@@ -27,7 +27,14 @@
  * the serial-send interrupt; nothing is ever received.
  *
  * With the adapter: each byte the console sends goes to wg_rx(), which may
- * block on the network (the emulator simply pauses). Adapter replies arrive
+ * block on the network (the emulator simply pauses, so a replay sees the same
+ * thing however long the server took). The one answer that depends on time is
+ * "nothing yet" after the game's own receive wait (wg.h, sock_recv_wait): the
+ * call waits that long for the server, and if nothing came the answer is then
+ * held for the same time on the console's clock, when a real adapter would
+ * send it. A game that gives up sooner and sends its next command never gets
+ * it, as on the platforms where the console runs while the adapter waits.
+ * Adapter replies arrive
  * one byte per 9600-baud byte time (about 12 scanlines) while the port is
  * enabled. The port holds one received byte: if the game hasn't read the
  * previous one, the new byte is lost and the overrun flag (status bit 1) is
@@ -72,6 +79,7 @@ static void send_irq_level(void)
 /* Scanlines per byte: 9600 baud ~ 960 B/s, ~12000 lines/s. */
 #define LINES_PER_BYTE_9600  12
 #define LINES_PER_BYTE_38400 3
+#define LINES_PER_MS         12
 
 static int      wg_on = -1;   /* -1 = not yet checked */
 static wg       gate;
@@ -90,6 +98,9 @@ static wgt      gate_tun;
 static wgt_stream gate_st;
 static wgt_ops  gate_tops;
 static unsigned tun_lines;
+static int    (*recv_wait_op)(void *ctx, int h, uint8_t *buf, size_t len, uint32_t wait_ms);
+static unsigned late_lines;     /* set inside wg_rx(): the game's receive wait ran out */
+static bool     rx_late;        /* the queued answer is held until that wait ends for the console */
 
 /* Lines between looks at the tunnel's incoming messages (~50 ms). */
 #define TUNNEL_POLL_LINES 600
@@ -117,6 +128,24 @@ static void rx_push(void *ctx, const uint8_t *buf, size_t len)
       rxq[rxq_tail] = *buf++;
       rxq_tail = next;
    }
+}
+
+/* The game's own receive wait. Nothing from the server in that time: the
+ * "nothing yet" answer is due when the wait ends on the console's clock. */
+static int late_recv_wait(void *ctx, int h, uint8_t *buf, size_t len, uint32_t wait_ms)
+{
+   int n = recv_wait_op(ctx, h, buf, len, wait_ms);
+
+   if (n == WG_RECV_NODATA)
+      late_lines = wait_ms * LINES_PER_MS;
+   return n;
+}
+
+/* The emulated console can't send while a call into the adapter waits. */
+static int console_never_busy(void *ctx)
+{
+   (void)ctx;
+   return 0;
 }
 
 static void wg_setup(void)
@@ -150,10 +179,13 @@ static void wg_setup(void)
       wgt_init(&gate_tun, &gate_tops, &gate_cfg);
       gate_tun.fw = "wgcore-emu";
       gate_tun.board = "emulator";
+      gate_tun.console_busy = console_never_busy;
       wgt_wg_ops(&gate_tun, &gate_ops);
       wgt_stream_connect(&gate_st);
       tun_on = 1;
    }
+   recv_wait_op = gate_ops.sock_recv_wait;
+   gate_ops.sock_recv_wait = late_recv_wait;
    wg_init(&gate, &gate_ops, &gate_cfg);
    wg_posix_log(&gate_px, tun_on ? "wgcore in emulator core: adapter attached to serial port, sockets through the tunnel"
                                  : "wgcore in emulator core: adapter attached to serial port");
@@ -180,6 +212,7 @@ void Comm_Reset(void)
          wgt_adapter_state(&gate_tun, gate.status);
       rxq_head = rxq_tail = 0;
       rx_wait = 0;
+      rx_late = false;
    }
 
    WSwan_InterruptAssert(WSINT_SERIAL_RECV, RecvLatched);
@@ -196,7 +229,21 @@ void Comm_Process(void)
       {
          if (raw_log)
             raw("tx", SendBuf);
+         if (rx_late)
+         {
+            /* The game gave up on its receive before the wait ran out. */
+            wg_posix_log(&gate_px, "# the console sent again before its receive wait ran out: that answer is not delivered");
+            rxq_head = rxq_tail;
+            rx_wait = 0;
+            rx_late = false;
+         }
          wg_rx(&gate, SendBuf);
+         if (late_lines)
+         {
+            rx_wait = (int)late_lines;
+            rx_late = true;
+            late_lines = 0;
+         }
          if (tun_on)
             wgt_adapter_state(&gate_tun, gate.status);
          idle_lines = 0;
@@ -221,6 +268,7 @@ void Comm_Process(void)
       {
          uint8 b = rxq[rxq_head];
          rxq_head = (rxq_head + 1) % sizeof rxq;
+         rx_late = false;
          if (!(Control & 0x80))
          {
             if (raw_log)

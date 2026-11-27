@@ -77,7 +77,9 @@ def route(host, path, headers=None, query=""):
         return lambda body: mail.start(path, body)
     if host == "www.mopera.ne.jp":
         return lambda body: portal.handle(path)
-    if host == "wg.channel.or.jp":   # the cart's "WonderSwan Web for WG" factory bookmark
+    # The cart's three factory bookmarks: "WonderSwan Web for WG", ゲームダウンロード (http://game/) and
+    # ドコモホームページ(テキスト). The adapter sends the last two names here too (core/wg.c).
+    if host in ("wg.channel.or.jp", "game", "www.nttdocomo.co.jp"):
         return lambda body: portal.handle(host + path)
     if (host, path) == ("s_hearts.wgg.channel.or.jp", "/cgi-bin/starhearts.cgi"):
         return lambda body: starhearts.handle(path, query, body)
@@ -160,6 +162,9 @@ def response(status, content_type, body, close=False, extra=None, eol="\r\n"):
 
 async def http_conn(reader, writer):
     peer = writer.get_extra_info("peername")
+    # What handlers remember for this connection only (Raku Jongg's name per mode). Each connection
+    # runs as its own task, so the variable is its own too.
+    swan_ranking.CONNECTION.set({})
     while True:
         try:
             head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 60)

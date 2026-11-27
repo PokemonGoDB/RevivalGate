@@ -3,7 +3,9 @@
 Status: **online battles work** headless (2026-10-13). Two emulated cartridges log in, take the
 prepaid "service", find each other through matchmaking, exchange parties, load the same map and
 pass turns through our relay. On 2026-11-26 battles were played to their end (a win, a loss, a
-draw), followed by a second battle between the same two cartridges. In story mode, the guild (ジュリア) registers characters as mercenaries
+draw), followed by a second battle between the same two cartridges. Since 2026-11-27 the server
+keeps each player's wins and losses and tells them to the opponent's cartridge (see Records), and a
+search for an opponent lasts three minutes. In story mode, the guild (ジュリア) registers characters as mercenaries
 on the server and hires other players' mercenaries, and every connection syncs the shared market
 prices (世界情勢) and pays mercenary owners their fees. Server: [`server/darkeyes.py`](../../wondergate/server/darkeyes.py).
 
@@ -112,10 +114,54 @@ VP 5 (their own lines: WIN 1 LOSE 0 VP 1 and WIN 0 LOSE 1 VP 0, so VP looks like
 losses, not below 0). COUNT is parsed into RAM `0x447`, but from the ROM nothing uses it: its
 getter (`4000:F9B6`, bank `0x34`) isn't in the function table the others are called through.
 
-We always send 0 / 0, so an opponent's record shows only the battle just played. Keeping real
-records would mean counting cmd 4 per customer ID (wins for MTCH-ID, losses for MTCH-OID); that
-isn't built. Draws and LOST endings report nothing, so the original server can't have counted
-them either.
+What the cart does with them, from the ROM and seen in the game (2026-11-27):
+
+- The matched reply's parser keeps **one byte** of each (`5900:3454` stores `DL` at RAM `0x445`,
+  `5900:3464` at `0x446`), so 255 is the most the cart can be told: sent BCOUNT 300, the cart
+  held 44. The battle set-up copies them to words at SRAM `0x4A59` / `0x4A5B` (ROM `0x35E1D7`),
+  after the battle the cart adds 1 to one of them, and the screen prints the word: sent ACOUNT
+  255, the loser's cart showed the winner as WIN 256. So 256 is the most the screen ever shows.
+- **The player's own line never comes from the server.** No reply has a field for it (the cart's
+  whole header list is at ROM `0x359380`; the matched reply's ACOUNT, BCOUNT and COUNT are the
+  only counts). The cart counts its own battles in its save: words at SRAM `0x6015` (wins) and
+  `0x6017` (losses). After three battles they held 2/1 on one cart and 1/2 on the other, as
+  each cart's あなたの対戦成績 line showed. The record screen is the only place a record is shown:
+  its two headings and the WIN / LOSE labels occur once in the ROM (`0x36A8BF`, `0x36A69D`).
+- VP is the cart's own sum, wins minus losses and not below 0.
+
+**What we keep (built 2026-11-27; ours, the original server's rules are unknown).** One record
+per customer ID: wins and losses. The winner's cmd 4 is the only report a battle makes, so a win
+is counted for its MTCH-ID and a loss for its MTCH-OID when, and only when, that cmd 4 ends a
+battle the server itself paired between those two IDs and the loser's side of it is still there.
+The battle is removed in the same step, so a repeated cmd 4 finds nothing to count. Draws and
+LOST endings report nothing and count for nobody (the original server can't have counted them
+either). The blank ID `00000000` keeps no record, nor does any ID that isn't 8 hex digits, and
+a battle between two carts with the same ID isn't counted. Each matched reply then carries the
+opponent's real counts, capped at 255. Python keeps them in `data/darkeyes-records.json`; the
+Worker in its own D1 row (`darkeyes-records`) of at most 2000 players, dropping those whose last
+decided battle is oldest, and counts at most 100 wins a day from one address.
+
+Seen in the game (two emulated carts, three battles in a row from power-on): after the first,
+each cart showed the other with only that battle (the winner's cart: opponent WIN 0 LOSE 1; the
+loser's: WIN 1 LOSE 0). For the second battle the server sent the loser's cart ACOUNT 1 /
+BCOUNT 0 and the winner's 0 / 1; the same cart won again and the screens showed the opponent as
+WIN 2 LOSE 0 and WIN 0 LOSE 2. Then cmd 4 was sent by hand: the winner's again (twice), the
+loser claiming a win, the winner naming an ID it never played, an outsider naming a real player,
+and, while a third battle was on, an outsider and both players' IDs under another hero name.
+Every one was answered 6 and the records stayed 2/0 and 0/2. The other cart won the third
+battle: WIN 2 LOSE 1 and WIN 1 LOSE 2 on the two screens, the same as each cart's own line on
+the other. The Python and Worker handlers gave the same replies (status, headers in order, body)
+to the same 1,375 requests (pairings, battles, every forgery above, blank and malformed IDs, 260
+wins to reach the cap), and the two servers byte-identical replies over the wire (the Worker
+under wrangler with a local D1) to the 192 requests of that three-battle session.
+
+Limits, by design of the protocol: the cart decides who won and the server can't check it; a
+player's ID is all that identifies them and the opponent's cart is told it, so a modified client
+could claim wins. A cmd 4 whose reply is lost is counted once (the cart's repeat finds no
+battle). If the loser has already gone back to the search when the winner's cmd 4 arrives, the
+battle isn't counted. In the Worker the count is a second write after the one that ends the
+battle; if it fails the win is lost, never counted twice. The cart's own line and our record
+can differ: the cart counts every battle it finishes, we only those reported to this server.
 
 ## Mercenaries and the world market (story mode)
 
@@ -207,12 +253,17 @@ script pointer set to `0x6C49` (ジュリア's "2. 傭兵の登録と雇用を�
 ## Our server
 
 Players are told apart by MTCH-ID and name. Mercenaries, earnings and the market are kept in
-`data/darkeyes.json`; matchmaking and battles are kept in memory (the Worker: one D1 row).
+`data/darkeyes.json`, win and loss records in `data/darkeyes-records.json`; matchmaking and
+battles are kept in memory (the Worker: one D1 row each for the world, the records and the
+matchmaking).
 
 **Search.** Two pollers with the same MTCH-PASS (empty = random match) are paired; each gets the
 same seed and MATCH 0/1. The search can't be cancelled on the cart (B does nothing): it polls for
-TIMEOUT seconds (we send 60), then says 対戦相手が見つかりません and stops without telling the server.
-A waiting player is forgotten 10 s after their last poll. Because of that silence a pair is
+TIMEOUT seconds, then says 対戦相手が見つかりません and stops without telling the server. We send 180
+(60 until 2026-11-27; the cart would take up to 873).
+A waiting player is forgotten 10 s after their last poll; that and the 10 s of the two-step
+confirmation below are counted from polls, not from the start of the search, so they stayed as
+they were. Because of that silence a pair is
 confirmed in two steps: the player who was waiting is told on their next poll, the newcomer once
 that has happened, and a newcomer whose partner never polls again goes back to waiting after
 10 s. (Until 2026-11-26 the newcomer was told at once. Seen in the game: a cart that started
@@ -223,6 +274,14 @@ carts end with 見つかりません; that run was paced at real speed, since th
 clock.) What's left: a newcomer that disappears in the second after it arrives still leaves the
 waiting player with a battle nobody joins.
 
+Checked in the game with the three-minute search (2026-11-27): a lone cart polled 120 times and
+showed 対戦相手が見つかりません 13,725 frames (182 seconds) after its first poll (40 polls and a
+minute before). At real speed, a second cart that began searching 1 min 55 s after the first was
+matched with it within a second and both opened the battle. Also at real speed, a second cart
+whose first poll came 0.4 s after the first cart's last one (its three minutes had just run out)
+was never told 見つかりました: the server held it for 10 s, put it back in the queue, and both
+carts ended with 見つかりません.
+
 **Battle.** Each side has two queues: parties (cmd 0/1) and turns (cmd 2/3). A player belongs to
 one battle; when they go back to the search, what their old opponent sends no longer reaches
 them: the old opponent collects anything still queued and is then answered 9 (the cart shows
@@ -230,7 +289,11 @@ LOST at once). (Until 2026-11-26 a late turn from an abandoned battle was delive
 player's next battle. Seen in the game: the player's cart showed the new opponent's first unit
 as done while the new opponent was still choosing its move.)
 
-**Time to think.** Match replies carry TIMEOUT 180, the search's keep 60. The cart whose turn it
+**Time to think.** Turn replies carry TIMEOUT 180, like the search since 2026-11-27. The matched
+reply and the party replies (cmd 0, and cmd 1 while there is nothing yet) carry 60: the carts swap
+parties on their own, so a cart whose opponent vanished right after the match still shows LOST
+after a minute (checked in the game against a made-up opponent that never sent a party: 40 polls,
+then LOST). The cart whose turn it
 is sends nothing while the player thinks; the other cart polls cmd 3 and shows LOST when TIMEOUT
 runs out, and the thinking player finds out only at their own next wait. With 60 on every reply
 (until 2026-11-26) a player who thought for a minute ended the battle; seen in the game. 180 is
@@ -268,9 +331,38 @@ make it scriptable:
   their first turn after the other side has walked two units forward. That battle is over in
   six turns. Defending every turn on both sides ends in DRAW after about 100 turns.
 
+The scratch tooling doesn't outlive a session, so here is that battle exactly as replayed seven
+times on 2026-11-27 (each time with the same result). Set-up: the `darkeyes` replay's pokes on
+both carts plus HP 1 (`poke:5154=01 5183=01 51B2=01 51E1=01 5210=01`) and another hero name on
+the second cart (`poke:515E=B6`); two emulator processes, each with its own adapter log, run in
+15-frame slices in turn; between adapter and server a pass-through that rewrites the matched
+reply's `X-SWAN-MTCH-SEED` to 1 (the server itself is untouched). サービスを受けますか？ comes up
+3,050–3,300 frames after サーバー接続. The cart that searched first gets MATCH 0 and stands at
+(4,2) (4,1) (6,2) (8,3), units 8–11; the newcomer, MATCH 1, at (2,4) (1,4) (2,6) (1,9), units 0–3,
+and moves first with all four.
+
+- The menu: A on the active unit opens it, the d-pad picks an entry and A confirms; ending a
+  turn asks ターンを終了します はい. A move is walked a tile per d-pad press (残り移動力 counts
+  down: grass 1, water and bushes 2); A ends it early, at 0 the game goes on to 方向選択 itself.
+- Newcomer: unit 0 `A UP A RIGHT RIGHT A LEFT A A` (to (4,4)); unit 1 `A UP A RIGHT RIGHT A A
+  LEFT A A` (to (3,4)); units 2 and 3 `A LEFT A A` (defend).
+- First searcher: unit 8 `A UP A DOWN A DOWN A RIGHT A A A A` (to (4,3), kills (4,4)); unit 9
+  `A UP A LEFT DOWN DOWN A A A A A` (to (3,3), kills (3,4)): VICTORY, and LOSE on the other cart.
+- For the newcomer to win instead: after its two moves everything defends. Turn order isn't
+  strict alternation: a unit that defended comes round again before one that moved, so the six
+  defenders (2, 3, 8–11) each go twice. Then unit 0 `A UP A UP A UP A RIGHT A A A A` (to (4,3),
+  kills (4,2)) and unit 1 `A UP A UP UP UP RIGHT A RIGHT A A A A` (to (3,1), kills (4,1)).
+  Sixteen turns.
+- After VICTORY / LOSE six A presses (the reward item, the bag is full, which item to drop, はい,
+  the autosave) reach the record screen, a seventh the title; `ram:1CB=3B ram:1CC=D8` at the
+  title leads back to the versus menu for the next battle.
+- For the record-screen limits the same pass-through rewrote ACOUNT and BCOUNT.
+
 Regression: `darkeyes` in `emu/replays.txt` (one cart, from boot through the search until it
 runs out) and `demerc` (boot to the guild, register a mercenary). What they leave behind when the
 replies were accepted: `darkeyes`: SRAM `0x6067` holds the ID (zeros if the login failed), RAM
-`0x398` = `4B 00` and `0x39A` = `94 11` (POLINT 1 and TIMEOUT 60 from the search replies; zeros
-if it never got that far); `demerc`: SRAM `0x6070` = `00000001` in ASCII and roster byte `0x519E`
+`0x398` = `4B 00` and `0x39A` = `BC 34` (POLINT 1 and TIMEOUT 180 from the search replies, in
+frames; `94 11` with the 60 seconds sent before 2026-11-27; zeros if it never got that far).
+`darkeyes` and `deagain` have to wait out the three-minute search (`w11500` where they had
+`w2500`); `demerc`: SRAM `0x6070` = `00000001` in ASCII and roster byte `0x519E`
 = `A2` (`82` if the upload failed).

@@ -27,9 +27,14 @@ interface Game {
   /** which of the games' two fonts names are in (src/data/digimon-text.ts) */
   font: DigimonFont;
   /** bytes between the result code and the profile in a battle reply */
-  header: () => Uint8Array;
+  header: (seed: number) => Uint8Array;
   /** one Digimon record -> number */
   strength: (rec: Uint8Array) => number;
+  /**
+   * (challenger's block, opponent's block, seed) -> true if the challenger wins the battle the cartridge
+   * will play, false if not, null if it can't tell (then the strength guess decides).
+   */
+  outcome?: (mine: Uint8Array, theirs: Uint8Array, seed: number) => boolean | null;
 }
 
 const GAMES: Record<string, Game> = {
@@ -37,7 +42,7 @@ const GAMES: Record<string, Game> = {
   // Battle header: stage (0) then seed.
   dm4: {
     prefix: 'dm4', key: 'digimon', record: 39, block: PROFILE + 3 * 39, font: 'd1',
-    header: () => new Uint8Array([0, randomInt(0, 256)]),
+    header: (seed) => new Uint8Array([0, seed]),
     strength: (r) => word(r, 11) + word(r, 19) + 4 * (word(r, 13) + word(r, 15) + r[17])
   },
   // Brave Tamer record (55 bytes, built by C9F7:3F97): flag (1, FF = empty slot), species word,
@@ -45,7 +50,7 @@ const GAMES: Record<string, Game> = {
   // Battle header: one byte, the battle's random seed (-> DS:2CF0).
   dmB: {
     prefix: 'dmB', key: 'digimon-b', record: 55, block: PROFILE + 3 * 55, font: 'bt',
-    header: () => new Uint8Array([randomInt(0, 256)]),
+    header: (seed) => new Uint8Array([seed]),
     strength: (r) => word(r, 0x0a) + word(r, 0x0c) + 4 * (word(r, 0x0e) + word(r, 0x10) + r[0x12])
   }
 };
@@ -57,6 +62,8 @@ interface Player {
   joined: string;
   /** The account of the relay that signed up, if it was linked: only that account may change the party. */
   account?: string;
+  /** how many ranking battles this tamer has asked for (it varies the battle seed) */
+  battles?: number;
 }
 
 // The ladder's state is one D1 row, so the tamers it keeps are capped: up to about 550 bytes each with a
@@ -167,9 +174,21 @@ function hallOfFame(db: Db): string[] {
   return ids.slice(0, 8);
 }
 
-function battle(game: Game, db: Db, opp: string, myRank: number, oppRank: number, result = 0): Uint8Array {
+/**
+ * A ranking battle's seed: one byte worked out from the two parties and how many ranking battles the
+ * challenger has asked for, so both servers pick the same one for the same battle and a second try gets
+ * another. (FNV-1a, low byte.)
+ */
+function battleSeed(player: Player, mine: Uint8Array, theirs: Uint8Array): number {
+  const n = (player.battles = (player.battles ?? 0) + 1);
+  let h = 0x811c9dc5;
+  for (const b of concat(mine, theirs, new Uint8Array([n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]))) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+  return h & 0xff;
+}
+
+function battle(game: Game, db: Db, opp: string, myRank: number, oppRank: number, seed: number, result = 0): Uint8Array {
   const block = unhex(db.players[opp].block!);
-  return concat(new Uint8Array([result]), game.header(), profile(db, opp, oppRank), block.slice(PROFILE, game.block), le16(myRank), le16(oppRank));
+  return concat(new Uint8Array([result]), game.header(seed), profile(db, opp, oppRank), block.slice(PROFILE, game.block), le16(myRank), le16(oppRank));
 }
 
 function joinedNow(): string {
@@ -231,12 +250,18 @@ export async function handle(conn: Conn, path: string, body: Uint8Array): Promis
       const me = ladder.indexOf(pid);
       if (me === 0) return reply(new Uint8Array([2]), `${tag} rankbtl: ${pid} is #1, party updated`);
       const opp = ladder[me - 1];
+      const oppBlock = unhex(players[opp].block!);
       const mine = power(game, body);
-      const theirs = power(game, unhex(players[opp].block!));
+      const theirs = power(game, oppBlock);
+      const seed = battleSeed(players[pid], body.subarray(0, game.block), oppBlock.subarray(0, game.block));
       // Ranks are 0-based on the wire; the challenger's 0 reads "ランクがい" (unranked)
-      const out = battle(game, db, opp, newcomer ? 0 : me, me - 1);
-      if (mine > theirs) [ladder[me - 1], ladder[me]] = [pid, opp];
-      return reply(out, `${tag} rankbtl: ${pid} (#${me + 1}, ${mine}) vs ${opp} (#${me}, ${theirs}) -> ${mine > theirs ? 'win' : 'lose'}`);
+      const out = battle(game, db, opp, newcomer ? 0 : me, me - 1, seed);
+      const known = game.outcome ? game.outcome(body.subarray(0, game.block), oppBlock.subarray(0, game.block), seed) : null;
+      // Brave Tamer: a tie goes to the challenger (the cartridge says WIN unless the whole party is knocked out
+      // within 10 rounds; equal parties showed WIN with every seed tried).
+      const won = known ?? (mine > theirs || (game.prefix === 'dmB' && mine === theirs));
+      if (won) [ladder[me - 1], ladder[me]] = [pid, opp];
+      return reply(out, `${tag} rankbtl: ${pid} (#${me + 1}, ${mine}) vs ${opp} (#${me}, ${theirs}) seed ${seed.toString(16).padStart(2, '0')} -> ${won ? 'win' : 'lose'}${known === null ? ' (strength guess)' : ''}`);
     }
     if (name === 'rankdl.cgi') return reply(listing(db, db.ranking), `${tag} rankdl: ${db.ranking.length} ranked`);
     if (name === 'idupld.cgi' && body.length >= game.block) {
@@ -264,7 +289,8 @@ export async function handle(conn: Conn, path: string, body: Uint8Array): Promis
     if (name === 'idbtl.cgi' && body.length >= 16) {
       const target = hex(body.subarray(8, 16));
       if (!players[target]?.block) return reply(new Uint8Array([1]), `${tag} idbtl: ${target} not found`);
-      return reply(battle(game, db, target, 0, 0), `${tag} idbtl: ${pid} vs ${target}`);
+      // No ladder move depends on this battle, so its seed is simply random.
+      return reply(battle(game, db, target, 0, 0, randomInt(0, 256)), `${tag} idbtl: ${pid} vs ${target}`);
     }
     return { status: 404, type: 'text/plain', body: 'not found\r\n', note: `${tag}: unhandled ${cgi} (${body.length} bytes)` };
   });

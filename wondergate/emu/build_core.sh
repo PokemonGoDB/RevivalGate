@@ -9,11 +9,11 @@
 #
 #   emu/build_core.sh [path/to/wscli-core]
 #
-# Output: wondergate/local/wscli-core-wg/mednafen_wswan_libretro.dylib
+# Output: wondergate/local/wscli-core-wg/mednafen_wswan_libretro.dylib (or under $WG_CORE_DIR)
 set -e
 DIR=$(cd "$(dirname "$0")/.." && pwd)
 SRC=${1:-"${WSCLI_HOME:?set WSCLI_HOME to the headless emulator host (see README.md), or pass its wscli-core path}/local/wscli-core"}
-DST="$DIR/local/wscli-core-wg"
+DST=${WG_CORE_DIR:-"$DIR/local/wscli-core-wg"}   # WG_CORE_DIR: build somewhere else (drive.py reads it too)
 
 [ -f "$SRC/Makefile.common" ] || { echo "no wscli core checkout at $SRC"; exit 1; }
 mkdir -p "$DIR/local"

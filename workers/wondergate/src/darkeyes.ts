@@ -11,14 +11,15 @@
 //   nph-listmrcnry MCDL-ID CLASS LVL -> MCDL-RETCD, MCDL-NO n, body n x 49-byte records
 //   nph-downmrcnry MCDN-ID MID       -> MCDN-RETCD (1 + SJIS message: withdrawn)
 //   nph-worldinfo  WINF-ID NAME MID MRID0 MRID1 + body (market block etc.) -> WINF-RETCD + body
-// Their state ('darkeyes-world') is separate from matchmaking's, which is polled every second.
+// Their state ('darkeyes-world') is separate from matchmaking's, which is polled every second, and so
+// are the players' win and loss records ('darkeyes-records'), written once per decided battle.
 import { isOffensive } from '../../../src/lib/wordfilter';
 import { bytesOf, concat, hex, jst, latin1, randomInt, sjisText, unhex } from './bytes';
 import { DARKEYES_MERC_GONE } from './encoded';
 import type { Conn } from './env';
 import type { Reply } from './http';
 import { quota, writeAllowed } from './limits';
-import { withState } from './state';
+import { readState, withState } from './state';
 
 const GROUPS: Record<string, string> = {
   'nph-login.cgi': 'SRVC', 'nph-account.cgi': 'ACNT', 'nph-upmrcnry.cgi': 'MCUP', 'nph-listmrcnry.cgi': 'MCDL',
@@ -27,13 +28,20 @@ const GROUPS: Record<string, string> = {
 const HOST = 'battleg1.dark-eyes.com';
 const PATH = '/cgi-bin/dark/nph-match.cgi';
 const POLL = 1;
-const TIMEOUT = 60;
+// TIMEOUT is how long the cart searches for an opponent before it says 対戦相手が見つかりません (it can't be
+// cancelled). 60 until 2026-11-27; three minutes gives two players more time to meet.
+// STALE is counted from a searcher's last poll (the cart polls every second or two), not from the start of
+// the search, so it doesn't grow with TIMEOUT: a cart that stopped searching is forgotten after 10 s.
+const TIMEOUT = 180;
 const STALE = 10;
 // The cart counts every wait in frames against the last TIMEOUT it was sent and shows LOST when it runs
 // out (5900:3A37), so in a battle TIMEOUT is how long the other player may think about a turn. With the
-// search's 60 a player who thought for a minute ended the battle for both. 180 is the cart's own value
+// search's old 60 a player who thought for a minute ended the battle for both. 180 is the cart's own value
 // before a reply sets one (5900:3693); 873 is the most the cart's 16-bit frame count can hold.
 const TURN_TIMEOUT = 180;
+// Between "matched" and the first turn the carts swap parties on their own, with nobody to wait for, so a
+// cart whose opponent vanished right after the match is still told LOST after a minute, not three.
+const PARTY_TIMEOUT = 60;
 // Limits that keep the shared state small (real parties are 480 bytes, turns about 20, and each side
 // collects its queue every second): a battle neither side has polled for 10 minutes is dropped. The state is
 // one D1 row that every poll rewrites, so the number of players waiting and battling is capped too
@@ -60,6 +68,39 @@ function customerId(): string {
   }
 }
 
+// 対戦成績: each player's wins and losses, by customer ID. The record screen after a battle shows the
+// opponent's WIN and LOSE from the matched reply's ACOUNT and BCOUNT, and the cart adds the battle just
+// played itself (the player's own line comes from the cart's save, not from us). The winner's cmd 4 is the
+// only report a battle makes (a draw or a dropped line sends nothing), so that is what we count.
+// The cart keeps one byte of each count (5900:3454, 5900:3464: 300 arrives as 44) and adds this battle
+// in a word, so 255 is the most it can be told and 256 the most it shows.
+const MAX_COUNT = 255;
+// The records are one D1 row, about 50 bytes a player (100 KB when full): the players whose last decided
+// battle is oldest go first. One address can have 100 wins a day counted, so it can't push everyone else out.
+const MAX_RECORDS = 2000;
+const WINS_PER_DAY = 100;
+type Records = Record<string, { win: number; lose: number; seen: number }>;
+
+/** A customer ID as we issue them. The blank ID of a cart that never got one is every such cart at once,
+ * so it keeps no record. */
+const keepsRecord = (id: string) => /^[0-9A-F]{8}$/.test(id) && id !== BLANK_ID;
+
+/** [wins, losses] to send about a player, no more than the cart can take. */
+function recordOf(recs: Records, id: string): [number, number] {
+  const r = Object.hasOwn(recs, id) ? recs[id] : undefined;
+  return [Math.min(r?.win ?? 0, MAX_COUNT), Math.min(r?.lose ?? 0, MAX_COUNT)];
+}
+
+function countWin(recs: Records, winner: string, loser: string) {
+  const now = Date.now() / 1000;
+  for (const [id, side] of [[winner, 'win'], [loser, 'lose']] as const) {
+    const r = Object.hasOwn(recs, id) ? recs[id] : (recs[id] = { win: 0, lose: 0, seen: now });
+    r[side]++;
+    r.seen = now;
+  }
+  keepNewest(recs, MAX_RECORDS, (r) => r.seen, (k) => delete recs[k]);
+}
+
 const keyOf = (h: Record<string, string>) => JSON.stringify([h['x-swan-mtch-id'] ?? '', h['x-swan-mtch-name'] ?? '']);
 const poll = (timeout = TIMEOUT) => ({ 'X-SWAN-MTCH-POLINT': String(POLL), 'X-SWAN-MTCH-TIMEOUT': String(timeout) });
 
@@ -78,8 +119,9 @@ function matched(m: Match): Record<string, string> {
   return {
     'X-SWAN-MTCH-RETCD': '2', 'X-SWAN-MTCH-ID': o.id, 'X-SWAN-MTCH-NAME': o.name, 'X-SWAN-MTCH-LVL': o.lvl,
     'X-SWAN-MTCH-SEED': String(m.seed), 'X-SWAN-MTCH-MATCH': String(m.side), 'X-SWAN-MTCH-HOST': HOST,
+    // ACOUNT and BCOUNT are filled in from the records once the pairing is committed (handle).
     'X-SWAN-MTCH-PATH': PATH, 'X-SWAN-MTCH-ACOUNT': '0', 'X-SWAN-MTCH-BCOUNT': '0', 'X-SWAN-MTCH-COUNT': '0',
-    ...poll()
+    ...poll(PARTY_TIMEOUT)
   };
 }
 
@@ -147,7 +189,8 @@ function reqmatch(state: State, h: Record<string, string>): [Record<string, stri
   return [{ 'X-SWAN-MTCH-RETCD': '1', ...poll() }, `reqmatch ${me}: found ${other} (seed ${seed}), who hasn't answered yet`];
 }
 
-function match(state: State, h: Record<string, string>, body: string): [Record<string, string>, string, string] {
+/** The last element is [winner, loser] (customer IDs) when this request decided a battle that counts. */
+function match(state: State, h: Record<string, string>, body: string): [Record<string, string>, string, string, [string, string]?] {
   const me = keyOf(h);
   const cmd = h['x-swan-mtch-cmd'] ?? '';
   const gone: [Record<string, string>, string, string] = [{ 'X-SWAN-MTCH-RETCD': '9' }, '', `match ${me} cmd ${cmd}: no match`];
@@ -159,11 +202,22 @@ function match(state: State, h: Record<string, string>, body: string): [Record<s
     // 0x35E516 calls 5900:3A60 when the result byte at SRAM 0x4A0A is 0xFD; the loser and both sides of a
     // draw just hang up). It asks again every POLINT until the answer is 6; 9 is an error. The battle is over
     // for the sender; the loser keeps its side only while the last turn is still waiting to be collected.
+    let note = 'battle over';
+    let won: [string, string] | undefined;
     if (m) {
       delete state.matches[me];
+      // The win counts once, here, and only for a battle we paired that the named loser is still in: a
+      // repeat, a made-up opponent or a cmd 4 with no battle finds none.
+      const [mine] = JSON.parse(me) as [string, string];
+      const [theirs] = JSON.parse(m.opp) as [string, string];
+      const loser = h['x-swan-mtch-oid'] ?? '';
+      if (opp && loser === theirs && theirs !== mine && keepsRecord(mine) && keepsRecord(loser)) {
+        won = [mine, loser];
+        note = `battle over, a win against ${loser}`;
+      }
       if (opp && !opp.turns.length) delete state.matches[m.opp];
     }
-    return [{ 'X-SWAN-MTCH-RETCD': '6', ...poll() }, '', `match ${me} cmd 4: battle over`];
+    return [{ 'X-SWAN-MTCH-RETCD': '6', ...poll() }, '', `match ${me} cmd 4: ${note}`, won];
   }
   if (!m) return gone;
   m.seen = Date.now() / 1000;
@@ -190,9 +244,9 @@ function match(state: State, h: Record<string, string>, body: string): [Record<s
   }
   if (cmd === '0') {
     opp.inbox.push(body);
-    return [{ 'X-SWAN-MTCH-RETCD': '0', ...poll() }, '', `match ${me} cmd 0: posted ${body.length} bytes`];
+    return [{ 'X-SWAN-MTCH-RETCD': '0', ...poll(PARTY_TIMEOUT) }, '', `match ${me} cmd 0: posted ${body.length} bytes`];
   }
-  if (cmd === '1') return [{ 'X-SWAN-MTCH-RETCD': '1', ...poll() }, '', `match ${me} cmd 1: nothing yet`];
+  if (cmd === '1') return [{ 'X-SWAN-MTCH-RETCD': '1', ...poll(PARTY_TIMEOUT) }, '', `match ${me} cmd 1: nothing yet`];
   if (cmd === '2') {
     opp.turns.push(body);
     return [{ 'X-SWAN-MTCH-RETCD': '3', ...poll(TURN_TIMEOUT) }, '', `match ${me} cmd 2: turn posted (${body.length} bytes)`];
@@ -542,8 +596,20 @@ export async function handle(conn: Conn, path: string, headers: Record<string, s
   let note: string;
   if (name === 'nph-reqmatch.cgi') {
     [h, note] = await withState(conn, 'darkeyes', fresh, (state) => reqmatch(state, headers));
+    if (h['X-SWAN-MTCH-RETCD'] === '2') {
+      const [wins, losses] = recordOf(await readState<Records>(conn, 'darkeyes-records', () => ({})), h['X-SWAN-MTCH-ID']);
+      h['X-SWAN-MTCH-ACOUNT'] = String(wins);
+      h['X-SWAN-MTCH-BCOUNT'] = String(losses);
+    }
   } else if (name === 'nph-match.cgi') {
-    [h, data, note] = await withState(conn, 'darkeyes', fresh, (state) => match(state, headers, latin1(raw)));
+    let won: [string, string] | undefined;
+    [h, data, note, won] = await withState(conn, 'darkeyes', fresh, (state) => match(state, headers, latin1(raw)));
+    // Counted after the battle's end is committed, so a win is never counted twice (it is lost if this
+    // second write fails).
+    if (won && (await quota(conn, 'darkeyes win', WINS_PER_DAY))) {
+      const [winner, loser] = won;
+      await withState<Records, void>(conn, 'darkeyes-records', () => ({}), (recs) => countWin(recs, winner, loser));
+    }
   } else if (Object.hasOwn(WORLD, name)) {
     // Registering and hiring are limited per address; a refused upload gets an error code, a refused
     // hire the "withdrawn" message.

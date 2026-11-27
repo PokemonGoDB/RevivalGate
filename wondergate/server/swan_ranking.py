@@ -19,10 +19,17 @@ One block per course, courses in order. Owner and score strings are stored
 and echoed exactly as the game sent them. Per-game details are in
 docs/wondergate/<game>.md.
 """
+import contextvars
+import os
 import sqlite3
 import time
 
 CONTENT_TYPE = "application/x-swan-ranking-response"
+
+# What a handler may remember between the requests of one connection: wgserver.http_conn sets a
+# fresh dict here for each connection, and it goes when the connection does. None outside a
+# connection (handle() called directly), and then nothing is remembered.
+CONNECTION = contextvars.ContextVar("connection", default=None)
 
 # Per game, from each game's parser (docs/wondergate/<game>.md):
 #   courses     blocks in a table reply
@@ -45,6 +52,8 @@ CONTENT_TYPE = "application/x-swan-ranking-response"
 #   row_rank_max  cap on the rank that starts a row (default: none)
 #   row_fmt     {course: f(row number from 0, score digits) -> digits sent in that row}
 #   raw_owner   True when the name is sent unencoded and may hold '&' (see parse_form)
+#   owner_per_course  True when each course is uploaded under its own name, in separate requests
+#               of one connection: a course's rank is looked up under the name its score came with
 def higher_is_better(score):
     return -int(score or 0)
 
@@ -124,14 +133,27 @@ def tarepang_puzzle(row, score):
     return f"{score[:5]}0{minutes:02d}{seconds:02d}"
 
 
+def pocketf_info(now=None):
+    """Pocket Fighter's info= flags: 6 extras, then 7 digital cards; '1' unlocks. The extras are
+    always on. The cards rotate: each day (Japan time) offers one, Monday the first, so downloading
+    on every day of the week collects all 7 (the game only ever adds cards to the 7-bit set in its
+    save, ROM 0x1CFAFB). Bandai's own server is not known to have done this; it's ours, so a card
+    download means something again. PF_DATE=YYYY-MM-DD is a test hook: the card of that day."""
+    if os.environ.get("PF_DATE"):                       # test override
+        day = time.strptime(os.environ["PF_DATE"], "%Y-%m-%d").tm_wday
+    else:
+        day = time.gmtime((time.time() if now is None else now) + 9 * 3600).tm_wday   # Monday = 0
+    return "1" * 6 + "".join("1" if i == day else "0" for i in range(7))
+
+
 def pocketf_content(fields):
     """Pocket Fighter: extras and digital cards are both requested with group=0
     and no list, and read the same info= line differently: extras (subtype 0C,
     ROM 0x1CFB61) take the first 6 chars as flags, cards (0B, 0x1CFAFB) skip 6
-    and take the next 7. '1' unlocks; we unlock everything with 13 ones.
+    and take the next 7 (see pocketf_info).
     `owner` is the player code: 3-letter name + character letter."""
     if fields.get("group") == "0" and "list" not in fields:
-        return "info=" + "1" * 13 + "\r\n"
+        return "info=" + pocketf_info() + "\r\n"
     return None
 
 
@@ -139,11 +161,13 @@ GAMES = {
     # Raku Jongg: your rank and the row count go as one character each (see one_char; parser
     # ROM 0xBF248, 0xBF359). The game announces ranks 1-20 only, so anything lower goes as 21.
     # Names are the game's own character codes, sent as they are: its digit 6 is '&' and its
-    # small ァ is '|' (raw_owner, bar_free).
+    # small ァ is '|' (raw_owner, bar_free). The save has a name per mode and each of the three
+    # POSTs carries its own; the table request is the third, so the first two names are
+    # remembered for the connection (owner_per_course).
     "rakujang": {"courses": 3, "max_rows": 20, "name_max": 8, "header": False,
                  "count_max": 99, "score": {None: (1, 6)}, "group": 1,
                  "rank_fmt": one_char(21), "count_fmt": one_char(20),
-                 "raw_owner": True, "name_fmt": bar_free("\x85")},
+                 "raw_owner": True, "name_fmt": bar_free("\x85"), "owner_per_course": True},
     # GunPey EX: a score row has room for 6 characters (a 7th zeroes it), and the game shows the
     # first six digits of that 7-digit field with "00" after them, the way it shows your own
     # score. So the uploaded number goes back as it came, in 6 digits: 0001234560 is 12345600
@@ -282,6 +306,12 @@ def handle(store, game, body):
     reply_key = None
     # Final Lap: group 2 asks for courses 17-32 (lap times; 1-16 are total times).
     course_base = (group - 1) * cfg["courses"] if cfg.get("courses_per_group") else 0
+    # The name each course was uploaded under on this connection (owner_per_course): that is the
+    # player's row there. A course not uploaded on this connection is looked up under this
+    # request's name.
+    conn = CONNECTION.get()
+    named = conn.setdefault("owners", {}) if conn is not None and cfg.get("owner_per_course") else {}
+    owner_of = lambda course: named.get((game, player, course), owner)
     width = {}
     for k, v in fields:
         if k != "score":
@@ -298,6 +328,8 @@ def handle(store, game, body):
                 store.submit(table_of(course), 1, player, owner, score, extra, rank_key(cfg, 1))
             else:
                 store.submit(table_key, course, player, owner, score, extra, rank_key(cfg, course))
+                if course_base < course <= course_base + cfg["courses"]:
+                    named[(game, player, course)] = owner
             note.append(f"course {course}: {score}{'|' + extra if extra else ''}")
 
     special = cfg.get("content", lambda f: None)(first)
@@ -344,21 +376,24 @@ def handle(store, game, body):
     for course in range(course_base + 1, course_base + cfg["courses"] + 1):
         first_row = start
         if relative:
-            _, _, my_rank, _ = store.table(table_key, course, 1, 1, player, owner, rank_key(cfg, course))
+            _, _, my_rank, _ = store.table(table_key, course, 1, 1, player, owner_of(course),
+                                           rank_key(cfg, course))
             first_row = max(1, (my_rank or 1) - start)
         if near is not None:
-            total, rows, rank, mine = store.table(table_key, course, 1, start, player, owner,
+            total, rows, rank, mine = store.table(table_key, course, 1, start, player, owner_of(course),
                                                   rank_key(cfg, course))
             ranked = list(enumerate(rows, 1))
             if rank > start:
                 lo = max(start + 1, rank - near)
-                _, more, _, _ = store.table(table_key, course, lo, rank - lo + 1, player, owner,
+                _, more, _, _ = store.table(table_key, course, lo, rank - lo + 1, player, owner_of(course),
                                             rank_key(cfg, course))
                 ranked += list(enumerate(more, lo))
         else:
-            total, rows, rank, mine = store.table(table_key, course, first_row, count, player, owner,
-                                                  rank_key(cfg, course))
+            total, rows, rank, mine = store.table(table_key, course, first_row, count, player,
+                                                  owner_of(course), rank_key(cfg, course))
             ranked = list(enumerate(rows, first_row))
+        if owner_of(course) != owner:
+            note.append(f"course {course} as {owner_of(course)!r}")
         ew = width.get(course, (6, 2))[1]
         cap = cfg["count_max"]
         top = reply_score(cfg, course, rows[0][1] if rows else 0)

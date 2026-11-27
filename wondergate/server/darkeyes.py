@@ -11,12 +11,13 @@ Flow (title → 対戦 → ワンダーゲート → マッチング実行 → p
     nph-reqmatch  MTCH-ID NAME LVL PASS RETRY -> MTCH-RETCD 0/1 = keep polling (POLINT, TIMEOUT
                   in seconds), 9 = error, 2 = matched: MTCH-ID NAME LVL (opponent),
                   SEED, MATCH (side), HOST, PATH (where nph-match lives), ACOUNT BCOUNT (the
-                  opponent's wins and losses so far, shown after the battle; we send 0), COUNT
+                  opponent's wins and losses so far, shown after the battle; see RECORDS), COUNT
     nph-match     MTCH-ID OID NAME CMD + body -> cmd 0 = post my battle data (RETCD 0 ok, 1 retry)
                                                  cmd 1 = fetch the opponent's (2 + body, 1 = not yet)
                                                  cmd 2 = post my turn (3)
                                                  cmd 3 = fetch the opponent's turn (5 + body, 4 = not yet)
-                                                 cmd 4 = I won (6); only the winner sends it
+                                                 cmd 4 = I won (6); only the winner sends it,
+                                                         and it is what the records count
 The server pairs two players polling reqmatch (same PASS, if one is set) and
 relays party and turn data between them (two queues per side); the battles run in the cartridges.
 A turn carries no number, and the cart posts it again when a reply is lost, so the relay can't
@@ -28,13 +29,15 @@ Story mode, a guild's 傭兵の登録と雇用 (mercenaries) and 世界情勢 (w
     nph-listmrcnry MCDL-ID CLASS LVL -> MCDL-RETCD, MCDL-NO n, body n x 49-byte records (MERC)
     nph-downmrcnry MCDN-ID MID       -> MCDN-RETCD (the cart copies the record from the list)
     nph-worldinfo WINF-ID NAME MID MRID0 MRID1 + body (market block etc.) -> WINF-RETCD + body
-Errors: RETCD != 0 with an SJIS message as the body. Data in data/darkeyes.json.
+Errors: RETCD != 0 with an SJIS message as the body. Data in data/darkeyes.json; the players'
+win and loss records in data/darkeyes-records.json.
 See docs/wondergate/dark-eyes.md.
 """
 import datetime
 import json
 import pathlib
 import random
+import re
 import secrets
 import struct
 import threading
@@ -307,13 +310,29 @@ GROUPS = {"nph-login.cgi": "SRVC", "nph-account.cgi": "ACNT", "nph-upmrcnry.cgi"
           "nph-listmrcnry.cgi": "MCDL", "nph-downmrcnry.cgi": "MCDN", "nph-worldinfo.cgi": "WINF",
           "nph-reqmatch.cgi": "MTCH", "nph-match.cgi": "MTCH"}
 HOST, PATH = "battleg1.dark-eyes.com", "/cgi-bin/dark/nph-match.cgi"
-POLL, TIMEOUT, STALE = 1, 60, 10
+# TIMEOUT is how long the cart searches for an opponent before it says 対戦相手が見つかりません (it can't be
+# cancelled). 60 until 2026-11-27; three minutes gives two players more time to meet.
+# STALE is counted from a searcher's last poll (the cart polls every second or two), not from the start of
+# the search, so it doesn't grow with TIMEOUT: a cart that stopped searching is forgotten after 10 s.
+POLL, TIMEOUT, STALE = 1, 180, 10
 # The cart counts every wait in frames against the last TIMEOUT it was sent and shows LOST when it runs
 # out (5900:3A37), so in a battle TIMEOUT is how long the other player may think about a turn. With the
-# search's 60 a player who thought for a minute ended the battle for both. 180 is the cart's own value
+# search's old 60 a player who thought for a minute ended the battle for both. 180 is the cart's own value
 # before a reply sets one (5900:3693); 873 is the most the cart's 16-bit frame count can hold.
 TURN_TIMEOUT = 180
+# Between "matched" and the first turn the carts swap parties on their own, with nobody to wait for, so a
+# cart whose opponent vanished right after the match is still told LOST after a minute, not three.
+PARTY_TIMEOUT = 60
 MATCH_IDLE = 600          # a battle neither side has asked about for this long is forgotten
+
+# 対戦成績: each player's wins and losses, by customer ID. The record screen after a battle shows the
+# opponent's WIN and LOSE from the matched reply's ACOUNT and BCOUNT, and the cart adds the battle just
+# played itself (the player's own line comes from the cart's save, not from us). The winner's cmd 4 is the
+# only report a battle makes (a draw or a dropped line sends nothing), so that is what we count.
+RECORDS = DB.with_name("darkeyes-records.json")   # {customer ID: {"win": n, "lose": n}}
+# The cart keeps one byte of each count (5900:3454, 5900:3464: 300 arrives as 44) and adds this battle
+# in a word, so 255 is the most it can be told and 256 the most it shows.
+MAX_COUNT = 255
 
 LOCK = threading.Lock()
 WAITING = {}   # key -> {"id", "name", "lvl", "pass", "seen"}
@@ -344,6 +363,30 @@ def prune(now):
 
 def polling(timeout=TIMEOUT):
     return {"X-SWAN-MTCH-POLINT": str(POLL), "X-SWAN-MTCH-TIMEOUT": str(timeout)}
+
+
+def keeps_record(cid):
+    """A customer ID as we issue them. The blank ID of a cart that never got one is every such
+    cart at once, so it keeps no record."""
+    return bool(re.fullmatch(r"[0-9A-F]{8}", cid)) and cid != BLANK_ID
+
+
+def load_records():
+    return json.loads(RECORDS.read_text()) if RECORDS.exists() else {}
+
+
+def record_of(cid):
+    """(wins, losses) to send about a player, no more than the cart can take."""
+    r = load_records().get(cid) or {}
+    return min(r.get("win", 0), MAX_COUNT), min(r.get("lose", 0), MAX_COUNT)
+
+
+def count_win(winner, loser):
+    recs = load_records()
+    recs.setdefault(winner, {"win": 0, "lose": 0})["win"] += 1
+    recs.setdefault(loser, {"win": 0, "lose": 0})["lose"] += 1
+    RECORDS.parent.mkdir(exist_ok=True)
+    RECORDS.write_text(json.dumps(recs, indent=1))
 
 
 def reqmatch(h):
@@ -382,11 +425,12 @@ def reqmatch(h):
 
 def matched(m):
     o = m["info"]
+    wins, losses = record_of(o["id"])
     return {"X-SWAN-MTCH-RETCD": "2", "X-SWAN-MTCH-ID": o["id"], "X-SWAN-MTCH-NAME": o["name"],
             "X-SWAN-MTCH-LVL": o["lvl"], "X-SWAN-MTCH-SEED": str(m["seed"]),
             "X-SWAN-MTCH-MATCH": str(m["side"]), "X-SWAN-MTCH-HOST": HOST, "X-SWAN-MTCH-PATH": PATH,
-            "X-SWAN-MTCH-ACOUNT": "0", "X-SWAN-MTCH-BCOUNT": "0", "X-SWAN-MTCH-COUNT": "0",
-            **polling()}
+            "X-SWAN-MTCH-ACOUNT": str(wins), "X-SWAN-MTCH-BCOUNT": str(losses), "X-SWAN-MTCH-COUNT": "0",
+            **polling(PARTY_TIMEOUT)}
 
 
 def match(h, body):
@@ -404,11 +448,18 @@ def match(h, body):
             # 0xFD; the loser and both sides of a draw just hang up). It asks again every POLINT
             # until the answer is 6; 9 is an error. The battle is over for the sender; the loser
             # keeps its side only while the last turn is still waiting to be collected.
+            note = "battle over"
             if m:
                 del MATCHES[me]
+                # The win counts once, here, and only for a battle we paired that the named loser is
+                # still in: a repeat, a made-up opponent or a cmd 4 with no battle finds none.
+                loser = h.get("x-swan-mtch-oid", "")
+                if opp and loser == m["opp"][0] != me[0] and keeps_record(me[0]) and keeps_record(loser):
+                    count_win(me[0], loser)
+                    note = f"battle over, a win against {loser}"
                 if opp and not opp["turns"]:
                     del MATCHES[m["opp"]]
-            return {"X-SWAN-MTCH-RETCD": "6", **polling()}, b"", f"match {me} cmd 4: battle over"
+            return {"X-SWAN-MTCH-RETCD": "6", **polling()}, b"", f"match {me} cmd 4: {note}"
         if not m:
             return gone
         m["seen"] = time.time()
@@ -427,9 +478,9 @@ def match(h, body):
             return gone
         if cmd == "0":
             opp["inbox"].append(body)
-            return {"X-SWAN-MTCH-RETCD": "0", **polling()}, b"", f"match {me} cmd 0: posted {len(body)} bytes"
+            return {"X-SWAN-MTCH-RETCD": "0", **polling(PARTY_TIMEOUT)}, b"", f"match {me} cmd 0: posted {len(body)} bytes"
         if cmd == "1":
-            return {"X-SWAN-MTCH-RETCD": "1", **polling()}, b"", f"match {me} cmd 1: nothing yet"
+            return {"X-SWAN-MTCH-RETCD": "1", **polling(PARTY_TIMEOUT)}, b"", f"match {me} cmd 1: nothing yet"
         if cmd == "2":
             opp["turns"].append(body)
             return {"X-SWAN-MTCH-RETCD": "3", **polling(TURN_TIMEOUT)}, b"", f"match {me} cmd 2: turn posted ({len(body)} bytes)"

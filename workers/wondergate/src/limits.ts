@@ -2,7 +2,8 @@
 //   writeAllowed  Workers rate limiting (WRITE_LIMITER), per minute. Cloudflare counts loosely (a flood
 //                 gets several times the limit through), so it's a brake, not a guarantee.
 //   quota         a hard daily count in D1 (wg_quota), for things that create something new: mail
-//                 accounts and messages, Digimon tamers, Wonder Classic members, Dark Eyes mercenaries.
+//                 accounts and messages, Digimon tamers, Wonder Classic members, Dark Eyes mercenaries
+//                 and counted wins.
 // The hard caps on sizes and collections in each service are what keep the shared state bounded; these
 // only stop one address from filling them. Loopback is exempt so the local test suites aren't throttled
 // (as TUNNEL_LIMITER in index.ts).

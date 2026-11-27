@@ -80,16 +80,49 @@ server `0xEF00` holds `33 00 4E 00 5F 00 68 00 53 00 5B 00 34`, `0xF06A` = `E8 0
 rank words are 1. With the table's body replaced by `?` bytes they stay 0 and the game sits on
 通信中 (its scan for `course` never ends).
 
-## Open: one name per mode
+## One name per mode (2026-11-27)
 
 The save has a record per mode, each with its own name (cartridge EEPROM `0x00`, `0x1E`, `0x3C`:
 8 name words, the score as a 32-bit number at `+0x14`, the stage at `+0x18`), and each POST
-carries its own mode's name. The table request is the third POST, so the server looks up all
-three ranks under the Time attack name. With three different names poked in, the Story and Dan
-ranks came back as 0 and the game said 圏外 for both, though both rows were 4th of 4 on the
-tables it had just downloaded. Not fixed: the server would have to remember the first two POSTs
-of a connection, or decide that the `*` id alone names a player (it is `FFFFFF` for everyone on
-an emulator). How the game lets a player end up with different names was not looked at.
+carries its own mode's name. The table request is the third POST, so it only names the Time
+attack record.
+
+What the game sends, from the adapter log of a session with three names poked into the save
+(あいう, かきくけ, たちつ) and from the code: one socket, then in this order
+
+```
+*=FFFFFF&owner=345&score=1|001000|02
+*=FFFFFF&owner=89:;&score=2|000200|04
+*=FFFFFF&owner=BCD&score=3|000200|04&list=rakujang|1|20
+```
+
+The request routine (ROM `0xCCA34`) sets the mode counter `[0xC110]` to 0 on entry, builds the body
+for that mode (`0xCDC61`: name, score and stage of mode 0, 1 or 2; the `list` field only for mode
+2), and after each reply adds 1 and sends again on the same socket until the counter is 2. Nothing
+skips a mode, and an error on any request ends the session, so the table request never arrives
+without the two uploads before it on the same connection.
+
+Both servers now remember, for one connection only, the name each mode's score came with, and
+look up the player's row in that mode under that name (and the same `*` id). A mode with no upload
+on the connection is looked up under the table request's own name, as before. The memory is a dict
+per connection (`swan_ranking.CONNECTION`, set by `wgserver.http_conn`; in the Worker
+`ranking.CONNECTION`, set by `HttpSession`), gone when the connection closes. This is how we tell
+which rows are the player's; what Bandai's server did is not known.
+
+Seen in the game with the three names above and other players seeded (`emu/seeds/rakumodes/`: two
+better Story scores, one better Dan score, three better Time attack scores): "ストーリー戦は 3位です。
+おめでとう", "段位認定戦は 2位です。おめでとう", "タイムアタックは 4位です。おめでとう"; rank words `0xF130`,
+`0xF362`, `0xF594` = 3, 2, 4; 公的記録 → 段位認定 underlines かきくけ at 2位. The same session against
+a server without the memory says 圏外 for Story and Dan (rank words 0, 0, 4).
+
+Checked on both servers with the same requests (byte for byte the same replies): the three
+requests on three separate connections give ranks 0, 0 and the Time attack rank; two uploads on one
+connection and the table request on another give 0, 0; a different `*` id on the same connection
+is not matched; names holding `&`, `=` and `|` are matched.
+
+Not looked at: how the game lets a player end up with different names (they were poked into the
+save here). Not run: the Worker with the game itself (the Worker's replies were compared with the
+Python server's for the game's recorded requests sent on one connection).
 
 ## Client details (HTTP lib at ROM `0xCC00`–`0xD1C2`)
 

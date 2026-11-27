@@ -28,8 +28,11 @@ docs/wondergate/digimon-d1-tamers.md and docs/wondergate/brave-tamer.md):
 
 The battle itself is simulated by the cartridge from the two parties and the
 seed, and its result is never sent back (checked in both games), so the server
-decides who moves up the ladder by a guess: the stronger party takes the higher
-rank. The WIN/LOSE on screen can disagree; the docs have the numbers. IDs are
+decides who moves up the ladder. A game's `outcome` hook can play the battle
+out; neither game has one yet, because both battles read technique tables that
+only the cartridge holds (the docs map them). Until then it is a guess: the
+stronger party takes the higher rank, and in Brave Tamer a tie goes to the
+challenger. The WIN/LOSE on screen can disagree; the docs have the numbers. IDs are
 eight digits, which the games' text encoding stores as bytes 0-9. Each game
 keeps its own players and ladder (data/digimon*.json).
 """
@@ -47,11 +50,14 @@ def _word(rec, k):
 
 
 class Game:
-    def __init__(self, prefix, db, record, header, strength):
+    def __init__(self, prefix, db, record, header, strength, outcome=None):
         self.prefix, self.db, self.record = prefix, DATA / db, record
         self.block = PROFILE + 3 * record
-        self.header = header        # () -> bytes between the result code and the profile
+        self.header = header        # seed -> bytes between the result code and the profile
         self.strength = strength    # one Digimon record -> number
+        # (challenger's block, opponent's block, seed) -> True if the challenger wins the battle the
+        # cartridge will play, False if not, None if it can't tell (then the strength guess decides).
+        self.outcome = outcome
 
     def power(self, block):
         total = 0
@@ -66,13 +72,13 @@ GAMES = {
     # D1 Tamers record (39 bytes): name +5, HP +11, attack +13, P +15, speed +17 (byte), D +19.
     # Battle header: stage (0) then seed.
     "dm4": Game("dm4", "digimon.json", 39,
-                lambda: bytes([0, random.randrange(256)]),
+                lambda seed: bytes([0, seed]),
                 lambda r: _word(r, 11) + _word(r, 19) + 4 * (_word(r, 13) + _word(r, 15) + r[17])),
     # Brave Tamer record (55 bytes, built by C9F7:3F97): flag (1, FF = empty slot), species
     # word, name[6] +4, stat caps HP +0x0A, DP +0x0C, AP +0x0E, PP +0x10 (words), SP +0x12.
     # Battle header: one byte, the battle's random seed (-> DS:2CF0).
     "dmB": Game("dmB", "digimon-b.json", 55,
-                lambda: bytes([random.randrange(256)]),
+                lambda seed: bytes([seed]),
                 lambda r: _word(r, 0x0A) + _word(r, 0x0C) + 4 * (_word(r, 0x0E) + _word(r, 0x10) + r[0x12])),
 }
 
@@ -161,9 +167,20 @@ def hall_of_fame(db):
     return ids[:8]
 
 
-def battle(game, db, opp, my_rank, opp_rank, result=0):
+def battle_seed(player, mine, theirs):
+    """A ranking battle's seed: one byte worked out from the two parties and how many ranking
+    battles the challenger has asked for, so both servers pick the same one for the same battle
+    and a second try gets another. (FNV-1a, low byte.)"""
+    player["battles"] = n = player.get("battles", 0) + 1
+    h = 0x811C9DC5
+    for b in mine + theirs + n.to_bytes(4, "little"):
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h & 0xFF
+
+
+def battle(game, db, opp, my_rank, opp_rank, seed, result=0):
     block = bytes.fromhex(db["players"][opp]["block"])
-    return (bytes([result]) + game.header() + profile(db, opp, opp_rank)
+    return (bytes([result]) + game.header(seed) + profile(db, opp, opp_rank)
             + block[PROFILE:game.block] + my_rank.to_bytes(2, "little") + opp_rank.to_bytes(2, "little"))
 
 
@@ -205,14 +222,22 @@ def handle(path, body):
             save(game, db)
             return reply(b"\x02", f"{tag} rankbtl: {pid} is #1, party updated")
         opp = ladder[me - 1]
-        mine, theirs = game.power(body), game.power(bytes.fromhex(players[opp]["block"]))
+        opp_block = bytes.fromhex(players[opp]["block"])
+        mine, theirs = game.power(body), game.power(opp_block)
+        seed = battle_seed(players[pid], body[:game.block], opp_block[:game.block])
         # Ranks are 0-based on the wire; the challenger's 0 reads "ランクがい" (unranked).
-        out = battle(game, db, opp, 0 if newcomer else me, me - 1)
-        if mine > theirs:
+        out = battle(game, db, opp, 0 if newcomer else me, me - 1, seed)
+        won = game.outcome(body[:game.block], opp_block[:game.block], seed) if game.outcome else None
+        how = "" if won is not None else " (strength guess)"
+        if won is None:
+            # Brave Tamer: a tie goes to the challenger (the cartridge says WIN unless the whole party is
+            # knocked out within 10 rounds; equal parties showed WIN with every seed tried).
+            won = mine > theirs or (game.prefix == "dmB" and mine == theirs)
+        if won:
             ladder[me - 1], ladder[me] = pid, opp
         save(game, db)
-        return reply(out, f"{tag} rankbtl: {pid} (#{me + 1}, {mine}) vs {opp} (#{me}, {theirs}) -> "
-                          f"{'win' if mine > theirs else 'lose'}")
+        return reply(out, f"{tag} rankbtl: {pid} (#{me + 1}, {mine}) vs {opp} (#{me}, {theirs}) seed {seed:02x} -> "
+                          f"{'win' if won else 'lose'}{how}")
     if name == "rankdl.cgi":
         return reply(listing(db, db["ranking"]), f"{tag} rankdl: {len(db['ranking'])} ranked")
     if name == "idupld.cgi" and len(body) >= game.block:
@@ -239,7 +264,8 @@ def handle(path, body):
         target = body[8:16].hex()
         if not players.get(target, {}).get("block"):
             return reply(b"\x01", f"{tag} idbtl: {target} not found")
-        return reply(battle(game, db, target, 0, 0), f"{tag} idbtl: {pid} vs {target}")
+        # No ladder move depends on this battle, so its seed is simply random.
+        return reply(battle(game, db, target, 0, 0, random.randrange(256)), f"{tag} idbtl: {pid} vs {target}")
     return 404, "text/plain", b"not found\r\n", f"{tag}: unhandled {cgi} ({len(body)} bytes)"
 
 

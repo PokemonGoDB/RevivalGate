@@ -72,11 +72,26 @@ START:おわる"""),
 この ページは バンダイの<br>ものではなく、ワンダーゲートを<br>ふっかつさせた ファンが<br>つくりました。<br>
 <hr><a href="http://www.mopera.ne.jp/">ワンダーゲートの ホーム</a>
 </body></html>""",
+    # The factory bookmark ドコモホームページ(テキスト) opens http://www.nttdocomo.co.jp/mc-user/. Docomo's
+    # text page for the cart is gone, and the adapter sends that name to us so the request doesn't go to
+    # Docomo's site of today. Every path on that host gets this page: it says whose page it is.
+    "www.nttdocomo.co.jp/": lambda: """<html><head><title>ドコモホームページ</title></head><body>
+<b>ドコモホームページ(テキスト)</b><hr>
+ドコモの この ページは<br>もう ありません。<br><br>
+この ページは ドコモの<br>ものではなく、ワンダーゲートを<br>ふっかつさせた ファンが<br>つくりました。<br>
+<hr><a href="http://www.mopera.ne.jp/">ワンダーゲートの ホーム</a>
+</body></html>""",
 }
+# The factory bookmark ゲームダウンロード opens http://game/, a name with no domain; the adapter sends
+# it to us. It gets the portal's download page: the /game.wg link works from that host too (handle), and
+# ホーム leads to the portal, since "/" on this host is the page itself.
+PAGES["game/"] = lambda: PAGES["/download.html"]().replace('<a href="/">ホーム</a>', '<a href="http://www.mopera.ne.jp/">ホーム</a>')
 
 
 def handle(path):
-    if path == "/game.wg":
+    if path.startswith("www.nttdocomo.co.jp/"):
+        path = "www.nttdocomo.co.jp/"
+    if path in ("/game.wg", "game/game.wg"):
         # A game for the cart's GAME menu: the whole body, sent as
         # CONTENT-TYPE: APPLICATION/WONDERGATE (compared exactly, cart ROM 0x11584).
         # The body is raw 8086 code, run at 1000:0010 (see games/snake/snake.asm).

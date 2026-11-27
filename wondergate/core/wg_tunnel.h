@@ -43,8 +43,13 @@
 /* Defaults; the platform may change t->connect_ms / t->recv_ms after init. */
 #define WGT_CONNECT_MS 10000
 /* As wg_posix: a receive with nothing buffered waits this long, then answers
- * "0 bytes, still open". Game replays rely on it. */
+ * "0 bytes, still open". Game replays rely on it. A receive that carries the
+ * game's own wait uses that instead once the platform set t->console_busy. */
 #define WGT_RECV_MS    2000
+/* How often a receive waiting out the game's own wait looks at the console. */
+#ifndef WGT_CONSOLE_MS
+#define WGT_CONSOLE_MS 20
+#endif
 /* Once bytes are buffered, a receive keeps gathering while more arrive within
  * this gap (a reply crosses the link as several messages). */
 #ifndef WGT_GATHER_MS
@@ -111,6 +116,14 @@ typedef struct wgt {
 
   /* INFO text fields; NULL or "" = left out. */
   const char *fw, *serial, *board;
+
+  /* Set after init to honour the game's own receive wait (wg.h,
+   * sock_recv_wait): nonzero = the console has sent bytes wgcore hasn't been
+   * fed yet, which ends that wait with no answer. A platform whose console
+   * can't send meanwhile (an emulator paused inside the call) returns 0.
+   * NULL (the default) = every receive waits recv_ms, as before. */
+  int    (*console_busy)(void *ctx);
+  void    *console_ctx;
 
   char     names[WGT_NAMES][WGT_HOST_LEN + 1]; /* 10.0.0.(2 + i) */
   int      next_name;

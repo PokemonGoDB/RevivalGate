@@ -12,6 +12,7 @@ byte of a read lands on the library's socket number. docs/wondergate/ring-terror
 """
 import datetime
 import os
+import time
 
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
@@ -36,6 +37,7 @@ def terrors2(body):
         h, m = map(int, os.environ["T2_TIME"].split(":"))
         now = now.replace(hour=h, minute=m)
     clock = bytes([1 if now.hour < 12 else 2, now.hour % 12, now.minute])
+    time.sleep(float(os.environ.get("T2_DELAY", 0)))   # test hook: a reply that starts late, in seconds
     return (200, "application/octet-stream", b"T2" + clock + b"\r\n",
             f"terrors2 clock {now:%H:%M} JST", "close",
             {"Server": "wgserver", "Cache-Control": "no-cache"})

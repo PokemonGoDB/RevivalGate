@@ -306,9 +306,10 @@ static int t_sock_send(void *ctx, int h, const uint8_t *buf, size_t len)
   return (int)len;
 }
 
-static int t_sock_recv(void *ctx, int h, uint8_t *buf, size_t len)
+/* A receive: wait_ms for the first bytes. watch = this is the game's own wait,
+ * which the console sending again ends with no answer. */
+static int recv_for(wgt *t, int h, uint8_t *buf, size_t len, uint32_t wait_ms, int watch)
 {
-  wgt *t = ctx;
   wgt_sock *s = sock(t, h);
   uint32_t deadline;
   size_t n, i;
@@ -316,9 +317,18 @@ static int t_sock_recv(void *ctx, int h, uint8_t *buf, size_t len)
   if (!s || s->state != S_OPEN)
     return -1;
   wgt_poll(t);
-  deadline = now(t) + t->recv_ms;
-  while (!s->len && !ended(s) && !(s->flags & F_RD_SHUT) && left(t, deadline))
-    t->ops->pump(t->ops->ctx, left(t, deadline));
+  deadline = now(t) + wait_ms;
+  while (!s->len && !ended(s) && !(s->flags & F_RD_SHUT) && left(t, deadline)) {
+    int ms = left(t, deadline);
+
+    if (watch) {
+      if (t->console_busy(t->console_ctx))
+        return WG_RECV_DROPPED;
+      if (ms > WGT_CONSOLE_MS)
+        ms = WGT_CONSOLE_MS;
+    }
+    t->ops->pump(t->ops->ctx, ms);
+  }
 
   /* Hand the game what a TCP socket would: a reply crosses the link as
    * several messages (18 bytes each at the smallest MTU), and Dark Eyes reads
@@ -345,6 +355,22 @@ static int t_sock_recv(void *ctx, int h, uint8_t *buf, size_t len)
   s->taken = (uint16_t)(s->taken + n);
   maybe_ack(t, h, 0);
   return (int)n;
+}
+
+static int t_sock_recv(void *ctx, int h, uint8_t *buf, size_t len)
+{
+  wgt *t = ctx;
+
+  return recv_for(t, h, buf, len, t->recv_ms, 0);
+}
+
+static int t_sock_recv_wait(void *ctx, int h, uint8_t *buf, size_t len, uint32_t wait_ms)
+{
+  wgt *t = ctx;
+
+  if (!t->console_busy)
+    return recv_for(t, h, buf, len, t->recv_ms, 0);
+  return recv_for(t, h, buf, len, wait_ms, 1);
 }
 
 static void t_sock_shutdown(void *ctx, int h, int how)
@@ -421,6 +447,7 @@ void wgt_wg_ops(wgt *t, wg_ops *ops)
   ops->sock_shutdown = t_sock_shutdown;
   ops->sock_close = t_sock_close;
   ops->log = t_log;
+  ops->sock_recv_wait = t_sock_recv_wait;
 }
 
 /* ---- link and messages ---- */

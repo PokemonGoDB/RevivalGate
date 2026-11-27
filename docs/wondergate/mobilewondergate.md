@@ -9,8 +9,9 @@ downloaded through the browser. The original games are lost, so the portal offer
 [`server/mail.py`](../../wondergate/server/mail.py); the BPL reply is in `wgserver.py`.
 
 Checked again in the running cart on 2026-11-26: every BPL reply type the cart handles
-([BPL](#bpl-port-5555)), the three [factory bookmarks](#factory-bookmarks), and mail sent from
-one account and received by another ([Mail](#mail-mailmoperanejp)).
+([BPL](#bpl-port-5555)), the three [factory bookmarks](#factory-bookmarks) (all three reach pages
+of ours since 2026-11-27), and mail sent from one account and received by another
+([Mail](#mail-mailmoperanejp)).
 
 ## Browser
 
@@ -55,29 +56,39 @@ A body may also come packed: `FF FF 00`, 5 bytes (the first is the number of blo
 (ROM `0x1E8C7C`-`0x1E8F9E`). This was read from the code only, not tried.
 
 Nothing our server offers needs the other types: pages and the game download go through HTTP after
-type `0x10`. The one thing in the cart that cannot work that way is the first factory bookmark
-(below). What mopera's server really answered, and for which URLs, is not known.
+type `0x10`, the first factory bookmark included (below; the adapter sends its bare host name to
+us). What mopera's server really answered, and for which URLs, is not known.
 
 ## Factory bookmarks
 
-The cart comes with three bookmarks (ROM `0x1EAB08`). Opened in the cart on 2026-11-26:
+The cart comes with three bookmarks (ROM `0x1EAB08`). All three reach pages of ours since
+2026-11-27; opened in the cart that day (bookmarks are the sixth toolbar icon: A on an entry, then
+START and ブックマークを開く):
 
 | Title | URL | What happens |
 |---|---|---|
-| ゲームダウンロード | `game/` | BPL is asked about `game/`. After our type `0x10` the cart looks up a host called `game`, which doesn't exist, and shows 501.サーバの応答がありません. Not served. |
-| ドコモホームページ(テキスト) | `www.nttdocomo.co.jp/mc-user/` | The adapter doesn't redirect this name, so the request goes to NTT Docomo's real web server, which today answers 301. The cart doesn't follow redirects and shows "Moved Permanently". Not ours to serve. |
+| ゲームダウンロード | `game/` | BPL is asked about `game/` and answers type `0x10`. The cart looks up a host called `game`; the adapter sends that name to our server (it is on the built-in list in `core/wg.c`). The server answers `Host: game` with the portal's ゲームダウンロード page; its スネーク link (`/game.wg`, asked for on host `game`) downloads Snake, which then runs from GAME, and its ホーム link goes to the portal. |
+| ドコモホームページ(テキスト) | `www.nttdocomo.co.jp/mc-user/` | The adapter sends this name to our server too. Every path on that host gets one short page of ours (`portal.py`): Docomo's page is gone, this page is not Docomo's, and a link to the portal home. |
 | WonderSwan Web for WG | `wg.channel.or.jp/` | Reaches our server (`*.channel.or.jp` is redirected). Bandai's page is lost. The server answers with a page of ours (`portal.py`, keyed by host + path) that says so and links to the portal. |
 
-`game/` has no host name, so on the original service the BPL server must have answered it itself
-(a drawn page or a game); that is an inference. Two ways to make it do something were tried in the
-cart with scratch changes and both work, but neither is built, because both are choices about what
-that bookmark should mean:
+Before that change (seen 2026-11-26) `game/` ended in 501.サーバの応答がありません, because no host
+called `game` exists, and the Docomo bookmark went to NTT Docomo's web server of today, which
+answers 301; the cart doesn't follow redirects and showed "Moved Permanently". An adapter without
+the two names on its list still does both, so don't open the Docomo bookmark in a test with an
+older adapter: the request leaves for the real site. In the adapter log both lookups now read
+`(redirected)`.
 
-- BPL answers `game/` with type `0x12` and Snake. The download starts at once, with no page saying
-  whose game it is or that it replaces the stored one.
-- The adapter resolves the name `game` to our server (a `redirect game` line in its config) and the
-  server answers `Host: game` with the ゲームダウンロード page. The cart then sends
-  `GET / HTTP/1.0`, `Host: game`, and the page's `/game.wg` link downloads Snake.
+`game/` has no host name, so on the original service the BPL server must have answered it itself
+(a drawn page or a game); that is an inference, and what the bookmark showed is not known. Ours is
+a choice: the same download page the portal has, which says what the game is before anything is
+stored. The other way that works in the cart, BPL answering `game/` with type `0x12` and Snake,
+starts the download at once with no page, and is not built. We have no copy of Docomo's text page;
+our page for it only says it is gone.
+
+Both servers route the two hosts (`route()` in `wgserver.py` and `http.ts`), and their replies
+were compared byte for byte for `game/`, `game/game.wg`, a missing page on `game`, and three paths
+on the Docomo host, with the Worker's `encoded.ts` regenerated in a scratch copy. Both bookmarks
+were also opened in the cart against that Worker copy.
 
 ## Mail auto-setup (`start.mopera.ne.jp`, dial `0120-903-025`, then `#9601`)
 

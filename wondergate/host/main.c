@@ -51,6 +51,15 @@ static void log_px(void *ctx, const char *line)
   wg_posix_log(ctx, line);
 }
 
+/* Has the console sent bytes we haven't read yet? Ends a receive that is
+ * waiting out the game's own wait (wg.h, sock_recv_wait). */
+static int console_busy(void *ctx)
+{
+  struct pollfd p = { *(int *)ctx, POLLIN, 0 };
+
+  return poll(&p, 1, 0) > 0 && (p.revents & (POLLIN | POLLHUP | POLLERR));
+}
+
 static int open_serial(const char *dev, int baud)
 {
   struct termios t;
@@ -88,7 +97,7 @@ int main(int argc, char **argv)
   static wgt tun;
   static wgt_stream st;
   wgt_ops tops;
-  wg_posix px = { NULL, 1, NULL, tx_fd };
+  wg_posix px = { NULL, 1, NULL, tx_fd, NULL };
   wg_ops ops;
   int in_fd = STDIN_FILENO, out_fd = STDOUT_FILENO;
   const char *config = NULL, *serial = NULL, *logpath = NULL, *tunnel = NULL;
@@ -117,6 +126,7 @@ int main(int argc, char **argv)
     out_fd = in_fd;
   }
   px.tx_ctx = &out_fd;
+  px.console_fd = &in_fd;
   wg_posix_ops(&ops, &px);
   if (tunnel) {
     if (wgt_stream_setup(&st, &tun, tunnel, (uint16_t)mtu, &tops,
@@ -127,6 +137,8 @@ int main(int argc, char **argv)
     wgt_init(&tun, &tops, &cfg);
     tun.fw = "wgcore-host";
     tun.board = "pc";
+    tun.console_busy = console_busy;
+    tun.console_ctx = &in_fd;
     wgt_wg_ops(&tun, &ops);
     wgt_stream_connect(&st);
   }

@@ -14,6 +14,11 @@ typedef struct wg_posix {
   int   log_stderr;    /* also echo log lines to stderr */
   void *tx_ctx;        /* passed to tx */
   void (*tx)(void *tx_ctx, const uint8_t *buf, size_t len);
+  /* The descriptor the console's bytes arrive on, when the console runs in real
+   * time while a receive waits out the game's own wait (wg.h, sock_recv_wait):
+   * a byte from it ends that wait with no answer. NULL = the console can't send
+   * meanwhile (the emulator core: its clock stands still inside the call). */
+  const int *console_fd;
 } wg_posix;
 
 /* Fill ops with POSIX implementations; ops->ctx = p. */

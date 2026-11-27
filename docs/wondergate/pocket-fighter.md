@@ -22,7 +22,7 @@ srvcinfo (free, open until 2099), session, then the content request below.
 | download score | `…&group=1&list=ANSPF_SCORE|1|50` | course line + `ANSPF_SCORE=<k>` + `<rank>|<score>|<owner 4>|` rows |
 | download total points | `…&group=2&list=ANSPF_SCORE|1|50` | same, points table |
 | download per fighter | `…&owner=CAP<fighter>&group=<3 + fighter>&list=…` | same, that fighter's points table |
-| extras / cards | `…&group=0` | `info=` + 13 flags, `1` = on: extras read the first 6 (ROM `0x1CFB61`), cards skip 6 and read 7 (`0x1CFAFB`). Which card flags are on differs between our two servers, see below |
+| extras / cards | `…&group=0` | `info=` + 13 flags, `1` = on: extras read the first 6 (ROM `0x1CFB61`), cards skip 6 and read 7 (`0x1CFAFB`). One card flag is on per day, see below |
 
 **Tables:** the number in an upload's `score=NN|` and a download's `group=` is the same table: 1
 score, 2 total points, 3-14 one fighter's points (3 + the fighter's number: Ryu 3 … Gouki 14). Menus:
@@ -67,15 +67,25 @@ each `1` it sets that card's bit, and it never clears one. If the set grew it sa
 flags `0100000` took the save from `00` to `02`; `0000100` then made it `12`; the same reply again,
 and one with all flags off, said "no new cards" and left `12`; all seven on gives `7F`.
 
-So the game works with either way of serving cards, and our two servers differ on purpose:
+**One card a day (2026-11-27).** Both servers turn on one of the 7 card flags per day, Japan time,
+Monday the first (`info=1111111000000` on a Monday, `…0100000` on a Tuesday, `…0000001` on a
+Sunday), so the set fills over a week of downloads. The six extras are always on. The Worker has
+done this since 2026-10-15; the Python server turned all 7 on until now, and `wg-conformance.mjs`
+no longer masks the flags. The schedule is ours: Bandai's own is not known.
 
-- the Python server turns all 7 on (one download gives every card);
-- the Worker turns on one card per day, Japan time, Monday the first, so the set fills over a week
-  of downloads. This was added to the Worker on 2026-10-15 so that a card download keeps meaning
-  something, and is listed under "Deliberate differences" in `docs/wondergate-server.md`;
-  `wg-conformance.mjs` masks the 7 flags.
+Seen in the game against the Python server: a download on a Saturday (Japan time) got
+`info=1111110000010`, the game said あたらしいデジタルカードを にゅうしゅしました!! and the save went from
+`00` to `20`; a second download the same day said あたらしいデジタルカードは ありませんでした。 and left `20`.
+With the date pinned (below): Monday `01`, again the same day "no new cards"; then Tuesday `03`,
+again "no new cards"; then Sunday `43`.
 
-The six extras are on in both. Bandai's own schedule for the cards is not known.
+`PF_DATE=YYYY-MM-DD` in the Python server's environment is a test hook that fixes the day the card
+is chosen for (not in the Worker). The `pfcards` replay runs with `PF_DATE=2026-11-30`, a Monday
+(`emu/seeds/pfcards/server.env`), so its save always ends with `0x0F19` = `01 00`; without the
+hook the value is 1 shifted left by the weekday (Monday 0) and changes daily.
+
+Not run: the Worker with the game itself. Its `info=` replies were compared with the Python
+server's for the recorded card requests, unmasked, and were the same.
 
 ## Upload result and table size (2026-11-26)
 

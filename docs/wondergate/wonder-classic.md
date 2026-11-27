@@ -10,7 +10,10 @@ entered from エントリー and ranked: ワールドランキング, あなた�
 uploads a player's super shot, and VTR lists the uploaded shots and replays them.
 Checked in the game on 2026-11-26 (see "Stage word, weekly re-issue and the final" and the notes
 marked with that date): a new week's conditions now download, メンバーズカードの変更 works, and VTR
-with no shots on the server shows データがありません. The final stage is not served.
+with no shots on the server shows データがありません.
+Since 2026-11-27 the month ends with a **final** (けっしょう), run by rules of our own: see
+"The final: our rules, not Bandai's". It was played through in the game on both sides of the
+cutoff; 前回の入賞者 and 歴代ワールドランキング now show final results.
 Server: [`server/nclassic.py`](../../wondergate/server/nclassic.py) on port 10000.
 
 ## The game
@@ -73,8 +76,8 @@ Sources: the [manual](https://gamemanual.midnightmeattrain.com/entry/ナムコ�
   direction that shifts by up to 22.5° per hole. They're seeded by month and week, so every
   player gets the same round (`week_conditions` in `server/nclassic.py`: SHA-256 of the month and
   week, so the Worker port gives the same bytes). Pins stay at each
-  hole's default until we pick our own. "Final" here only means the harder weeks 4 and 5 of
-  our test round: the cart is told it is still the qualifier (see the stage word below).
+  hole's default until we pick our own. The final (from the fourth Monday) keeps one set of
+  conditions to the end of the month.
 - **The course list.** With the ROM, list every hole: course, number, par, length, hazards. That
   gives us themed tours, since holes can be mixed across courses. For example:
   - all par 3s ("short game")
@@ -87,8 +90,9 @@ Sources: the [manual](https://gamemanual.midnightmeattrain.com/entry/ナムコ�
 - **Structure as in the manual:**
   - A monthly tour with fixed holes.
   - Each Monday the round is re-issued with that week's weather and wind; the bulletin shows the
-    stage and that week's dates.
-  - After week 3, the top 100 (ties to the earlier entry) get the harder final.
+    stage and that stage's dates.
+  - After week 3, the top 100 get the harder final (built 2026-11-27: see "The final: our
+    rules, not Bandai's").
   - New equipment every Monday, cumulative.
 - **Leaderboards on our site:** the current tour's qualifier and final, past tours (歴代), and a
   super-shot ranking like the original site's. The sponsor field credits our project, not Bandai.
@@ -123,7 +127,8 @@ communication sub-menu LEFT goes back.
 ## Adapter fix it needed
 
 The game polls an idle socket before the server has spoken. A real adapter answers "0 bytes";
-we used to answer "closed" after 30 s. wgcore now waits ≤ 2 s and answers count 0.
+we used to answer "closed" after 30 s. wgcore now waits as long as the game asks (its receive
+command says 10) and then answers count 0.
 
 ## Protocol (port 10000, binary; library at ROM `0x361460`..`0x362A00`, buffers in SRAM)
 
@@ -143,23 +148,22 @@ it as the request's 5th byte.
 |---|---|---|---|
 | 1 | 0x16 | register member card → member ID (10) + 8 bytes. Card: handle +0 (8 two-byte characters), name +16, postal code +46, prefecture +54; we keep the handle and prefecture for the rankings | ✅ |
 | 2 | 0x0E | メンバーズカードの変更: the card again, in type 1's layout (0xED bytes). The cart needs one record with 10 bytes; it compares them with its member ID but ignores the result (script op `0x16`, `6000:2AEC`). With no record: きたいしたデータを うけとれませんでした 705. We send the member ID and keep the new handle and prefecture; what Bandai sent is not known | ✅ 2026-11-26 |
-| 6 | 0xCC | tour bulletin (body after `WSD\r`): round (word +0), stage (word +4, see below), qualifier cutoff rank (word +6), entry fee in yen (word +10; 0 = free, otherwise a prepaid card is asked for), start/end dates yyyymmdd text at +168/+176 (shown yy/mm/dd). Shown only when the stage is 4 (the final): prize cutoff rank (word +8), start/end dates at +184/+192 | ✅ (final fields seen with marker bulletins only) |
+| 6 | 0xCC | tour bulletin (body after `WSD\r`): round (word +0), stage (word +4, see below), qualifier cutoff rank (word +6), entry fee in yen (word +10; 0 = free, otherwise a prepaid card is asked for), the qualifier's start/end dates yyyymmdd text at +168/+176 (shown yy/mm/dd). Shown only when the stage is 4 (the final): prize cutoff rank (word +8, "32い までに はいれば にゅうしょうと なります"), the final's start/end dates at +184/+192 | ✅ (final: 2026-11-27) |
 | 5 | 0x111 | the Net Tour round, downloaded by 今回のコース with the bulletin's first 6 bytes as params: `<round word> 00 00 <stage word>` (parser `6000:4F8E`, unpacked into the tour save at SRAM 0xACF; see below) | ✅ |
 | 4 | 0x12 | server clock before an entry, `yyyymmddhhmmss` (JST); after the round's end date → すでに しめきりが すぎていました 707 | ✅ |
-| 9 | 0x14 | the entry: params round(4) 00 00 score (signed word, strokes over par). An empty reply completes it (エントリーした スコアデータは メモリーから さくじょしました) | ✅ |
-| 7 | 0x14 | あなたの順位, params round(4): rank word +2 | ✅ |
+| 9 | 0x14 | the entry in the qualifier: params round(4), the stage word, score (signed word, strokes over par). An empty reply completes it (エントリーした スコアデータは メモリーから さくじょしました). Outside this month's qualifier we answer status 2 (712) and keep nothing | ✅ |
+| 7 | 0x14 | あなたの順位 in the qualifier, params round(4): rank word +2. Equal scores share a rank, as in the cart's own list | ✅ |
 | 18 | 0x0E | スーパースーパーショット エントリー: uploads the 0x25-byte shot header (below). An empty reply completes it | ✅ |
 | 16 | 0x1B | VTR's shot list (params 4 constant bytes): word 1 (0 ends), 4-byte ID, 16 bytes shown (we send the uploader's handle), 1 byte; up to 20 (`6000:51CF`). The cart needs at least one record (script op `0x14`, `6000:2A24`; none gives error 705), so with no shots we send one zero record and the VTR screen says データがありません | ✅ 2026-11-26 |
 | 15 | 0x29 | one shot (params its 4-byte ID): the uploaded 0x25-byte header; the game re-simulates the shot ("SCENE 1 ホールインワン … 2ホール") | ✅ |
 | 20, 21 | 0x262, 0x480 | replays attached to a Net Tour round: after type 5, the game fetches up to 5 by the IDs in the round's word list at +0xC (type-5 procedure, `A000:1455`). Full 0x6A8-byte trajectories, not player uploads; the originals are lost and our rounds list none, so none are requested. Also sent with ID 0 (after type 19) only from the hidden communication test menu (`0x341300`), not by any player menu. Bodies (after a 0x1C-byte header) fill up to 5 slots of 0x6A8 bytes at `[0x50A8]` (0x242 + 0x460 bytes, count at 0x9DD+0x87E; `6000:54C6`, `6000:5529`). Empty → スーパーショットのデータが みつかりません | content lost |
 | 8 | 0x26 | this round's world ranking (ワールドランキング; params round(4) 00 00 start(2) count(2)): name +0 (8 two-byte characters), score +0x20 (signed word, strokes over par). Rank = list position, equal neighbours get "T"; HOLE shows F | ✅ |
-| 14 | 0x24 | 歴代ワールドランキング: round +2 (word), name +6, score +0x16 | ✅ |
+| 14 | 0x24 | 歴代ワールドランキング: round +2 (word, the TOUR column), name +6, score +0x16. We send the best final totals of past rounds | ✅ 2026-11-27 |
 | 13 | 0x08 | 前回の入賞者: previous round (word +0). Round 0 → だい1かいのネットツアーが しゅうりょうしていません | ✅ |
-| 11 | 0x45 | previous winners, params = type 13's 4 bytes + start + count: name +0, prefecture +0x10 (JIS 1–47), score +0x37 | ✅ |
+| 11 | 0x45 | a round's final ranking, params round(4) start(2) count(2). Asked by 前回の入賞者 (round from type 13; parser `6000:4EC6` shows name +0, prefecture +0x10 (JIS 1–47), score +0x37) and by ワールドランキング during the final (parser `6000:4DAC` shows name +0 and word +0x17 plus word +0x27). We fill all of them: the two scores at +0x17 and +0x27, their total at +0x37 | ✅ 2026-11-27 |
 | 22 | 0x08 | 新製品開発情報: an item, bytes [club set, ball, glove, shoes], 1 = パワー, 2 = コントロール; the first record is shown and unlocked | ✅ one a month |
-| 12 | 0x14 | the entry in the final (stage 4), same params as type 9. Not served: the empty reply makes the cart delete its score, and the server keeps nothing | not served |
-| 10 | 0x2E | あなたの順位 in the final, params round(4): rank word +2 (a marker record showed "1027位"). Not served: empty reply, error 705 | not served |
-| 11 (final) | 0x45 | ワールドランキング in the final, params round(4) start(2) count(2): name +0, score = word +0x17 plus word +0x27 (the two final rounds, parser `6000:4DAC`). We answer with the previous-winners layout, so every score reads ±0 | not served |
+| 12 | 0x14 | the entry in the final (stage 4), same params as type 9 (`0C 02 00 00 00 04 00 <score>`). An empty reply completes it; an error status leaves the score on the cart. See the final's rules below for who is refused | ✅ 2026-11-27 |
+| 10 | 0x2E | あなたの順位 in the final, params round(4): rank word +2; word +0x1E = 0 shows "5位（ざんてい）" (provisional), not 0 the rank alone (screen `6000:43C0`). The cart reads 0x2A bytes and shows nothing else of them | ✅ 2026-11-27 |
 
 ## The Net Tour round (type 5)
 
@@ -167,7 +171,9 @@ it as the request's 5th byte.
 +0     round (word); 0 = no tour, and the game menu has no ネットツアー
 +2..   5 words (+4 = stage, as in the bulletin; +0x0A = entry fee in yen, as in the bulletin;
        non-zero opens the paid サービスメニュー), then a word list from +0xC ending in 0
-+0xB2  start date, +0xBA end date: "yyyymmdd" text (shown yy/mm/dd; the entry deadline)
++0xB2  start date, +0xBA end date: "yyyymmdd" text (shown yy/mm/dd). The cart refuses an entry
+       when the server clock (type 4) is before the start (706, from the code) or after the
+       end (707, seen; `6000:18B3`), so each stage's round carries that stage's own dates
 +0xC2  18 hole indexes: built-in course * 18 + hole (table 6000:50FE)
 +0xD4  rain: byte +0xD4 = holes 1-8, byte +0xD5 = holes 10-17 (MSB first); holes 9 and 18
        are always dry, and byte +0xD6 is not used (see below)
@@ -212,7 +218,7 @@ direction 13, the arrow pointing up and to the left).
 In this vertical game DOWN is the confirm/swing button. Verified end to end headless: download,
 18 holes played with repeated swings (+144), reset, エントリー → type 9 with that score.
 
-## Stage word, weekly re-issue and the final (2026-11-26)
+## Stage word and weekly re-issue (2026-11-26, the final 2026-11-27)
 
 Word +4 of the bulletin and of the round is the tour's stage. Read from the ROM and then checked
 in the game:
@@ -225,33 +231,148 @@ in the game:
   says よせん; requests 8, 7, 9). Exactly 4: the final (けっしょう; requests 11, 10, 12). Above 4:
   ワールドランキング fails with 705 (`6000:197E`) and エントリー with 704 (`6000:19AD`); these two
   errors are from the code, the game was only tried with 5 on the bulletin screen (よせん).
-- The server used to send 0 every week, so after one download the cart answered 708 until the
-  next month (seen: same week, and a week later with the old bulletin). It now sends the week
-  of the month, changing every Monday (`stage_word`): 0 before the first Monday, then 1, 2, 3,
-  and 0xFFFF and 0xFFFE (−1, −2) for weeks 4 and 5, because 4 would start the final. Seen in
-  the game with 3 → 0xFFFF → 0xFFFE: the new round downloads once (the request carries the
-  stage: `05 02 00 00 00 FF FF`), a second try the same week gives 708, and with a negative
-  stage the bulletin says よせん, エントリー (types 4, 9), ワールドランキング (6, 8), あなたの順位 (7)
-  and the Net Tour itself work. These values are ours; what Bandai sent is not known.
+  ワールドランキング goes by the bulletin it has just fetched; エントリー and あなたの順位 go by the
+  round saved on the cart.
+- The server sends the week of the month (`stage_word`): 0 before the first Monday, then 1, 2
+  and 3, and 4 from the fourth Monday to the end of the month, fifth Monday included. That the
+  word counts weeks is our reading (4 = the final fits the manual's "week 4 is the final");
+  what Bandai sent is not known. Until 2026-11-26 it sent 0 every week (so a cart answered 708
+  until the next month), and on 2026-11-26 0xFFFF and 0xFFFE for weeks 4 and 5 to keep the cart
+  out of the final, which was not served then. Negative values were seen to work as the
+  qualifier; they are no longer sent.
 - A download for a new stage of the same round keeps the cart's entry counts (tour save +0x102
-  qualifier, +0x104 final) but clears an unsent score (+0xFE back to 0x7FFF).
+  qualifier, +0x104 final) but clears an unsent score (+0xFE back to 0x7FFF) and the last
+  entered score (+0x106 back to 0, parser `6000:50F1`).
+- **A side effect of the weekly re-issue, not fixed (2026-11-27).** The entry screen
+  (`6000:42DB`) refuses a qualifier score that is worse than the last one entered (+0x106) once
+  the cart has entered (+0x102 not 0): いぜんより きろくが わるくなっています / こんかいの エントリーは
+  ちゅうししました, and nothing is sent. Because a download sets +0x106 to 0, a cart that has
+  entered this month and then downloads a new week's round can only enter ±0 or better. Seen in
+  the game: entered +5, downloaded another week's round, +3 was refused and −2 was offered. No
+  reply of ours changes this; only keeping the stage word the same through the qualifier would
+  (and then a new week's conditions would not reach a cart that has the round). The final is
+  not affected: its entries are not compared.
 
-**The final is not served.** What the cart does when it is told stage 4 (forced in the game by
-patching our replies):
+## The final: our rules, not Bandai's (2026-11-27)
 
-- Bulletin: けっしょう, ただいま けっしょうせんを おこなっております, and its dates and "N位 までに
-  はいれば にゅうしょう" come from the final's own fields (+184/+192, word +8), which we leave empty.
-- エントリー: a cart with no qualifier entry on record (+0x102 = 0) refuses by itself (よせんに
-  エントリーしていないと けっしょうに さんかできません). Otherwise it explains that the final is the
-  total of 2 scores, that 1 alone is disqualified and that more than 2 can't be entered, then
-  sends types 4 and 12 (`0C 02 00 00 00 04 00 <score>`). It adds the scores up itself (+0x106).
-  Our empty reply counts as success, so the cart deletes its score and the server has kept nothing.
-- あなたの順位 asks type 10 (needs a final entry, +0x104 ≠ 0); our empty reply gives 705.
-- ワールドランキング asks type 11 instead of 8 and reads two scores per row (see the table).
+No Net Tour is known to have been held, and nothing survives of how Bandai's server ran a
+final: who exactly qualified, what a player who did not was told, how two rounds were ranked,
+the dates. **The rules below are ours.** They are the plainest reading we could find of the
+manual and of what the cartridge itself shows and says, which is listed after them.
 
-Not known, and needed before a final can run: what the original server answered a player outside
-the top 100 who asked for the final round, and how it ranked a single upload. None of this can
-be reached with our replies, since we never send stage 4.
+1. **Each month is one tour.** The qualifier (よせん) runs from the 1st to the day before the
+   fourth Monday, with new weather and wind every Monday; the final (けっしょう) runs from the
+   fourth Monday to the last day of the month, in one set of harder conditions.
+2. **The 100 best qualifying scores may enter the final.** A player's best entry of the month
+   counts, whichever week it was made in; players level on the 100th place all get in.
+3. **The final is ranked by the total of two rounds.** A player with one round in is on the
+   ranking with that score, provisionally, and is dropped when the month ends; the finished
+   ranking is what 前回の入賞者 and 歴代ワールドランキング show.
+
+The details, and why:
+
+- **Fourth Monday, not "the last week".** The cart takes stage 4 and only 4 as the final and
+  refuses anything above (see the stage word), and the manual has weeks 1 to 3 as the qualifier
+  and week 4 as the final. Counting weeks from each Monday, as the round's conditions already
+  did, puts the final on the fourth Monday in every month. **A month with five Mondays** just
+  has a longer final: the fifth Monday changes nothing (the stage stays 4, the round and its
+  conditions stay, a second download answers 708). Starting the final on the fifth Monday
+  instead would leave it one to three days long. The final is as long as the month allows:
+  8 days in November 2026 (23rd to 30th), 4 in December 2026 (28th to 31st), 10 at most. The
+  shortest are Februaries that begin on a Tuesday: 28 and 29 February 2028, and the 28th alone in 2033.
+- **Which qualifying score counts.** The player's best entry of the month, whichever week's
+  conditions it was played in. One score per player that only gets better is the cart's own
+  model: with a round on it, it sends a new score only if it beats the last one it entered
+  (see the stage word section). After a new week's download it can send a worse one, so the
+  server keeps the best.
+- **Ties.** The cart's ranking list gives equal scores the same rank ("2T", "2T", then 4; seen
+  in the game). The server ranks the same way everywhere: あなたの順位 shows the shared rank, and
+  everyone whose rank is 100 or better may enter the final. Inside a tie the earlier entry is
+  listed first (the manual's rule); for a player who improved, that is the time of the better
+  score, and in the final the time the total was reached.
+- **Who turns a player away.** The cart tells everyone the same thing. Its final bulletin says
+  ただいま けっしょうせんを おこなっております / よせんを つうかしないと エントリーは できませんので /
+  あらかじめ「あなたのじゅんい」を ごかくにんください, then warns that a download replaces the old
+  tour data and offers it. So the bulletin and the final round are the same for every player, and
+  the download is not refused (a failed download also wipes the round the cart holds:
+  `6000:59E4` zeroes it after any error in command 5; seen with a status-2 reply to type 5,
+  after which the saved round number was 0). A player who kept the qualifier's round
+  still sees the qualifier rank (type 7) during the final, as the bulletin asks.
+  - A cart that never entered the qualifier refuses the entry by itself: よせんに
+    エントリーしていないと けっしょうに さんかできません / じかいの ネットツアーに ごさんかください. Nothing
+    is sent.
+  - A cart that entered but is outside the 100 sends its score (type 12). **The server
+    refuses it** with status 7, which the cart shows as うけつけにんずうを こえたため とうろくが
+    できません 715 ("more than the number accepted, it cannot be registered"). It is the
+    closest of the cart's server errors; no status says "not qualified". The cart keeps the
+    score and its counters.
+  - The cart stops a third entry itself (けっしょうせんのエントリーは 2かいだけしか できません); the
+    server answers one the same way, with 715.
+- **One round entered.** Before each final entry the cart says けっしょうは 2かいのスコアの
+  ごうけいで きそいます / 1かい だけでは しっかくとなります / また 2かい いじょうは エントリーできません.
+  After one entry its あなたの順位 screen shows "5位（ざんてい）" and もういちど エントリーすれば
+  せいしきじゅんいと なります when word +0x1E of the type-10 record is 0; after two, the rank
+  alone. So a player with one round has a rank, called provisional. We rank everyone by strokes
+  over par so far, the way a golf leaderboard does during play: the ranking list (type 11)
+  holds one-round players with their one score, and the rank in type 10 is the place in that
+  list. When the month ends, the players with one round are left out (しっかく).
+- **The bulletin.** In the final it shows the final's dates (+184/+192) and "32い までに はいれば
+  にゅうしょうと なります" (word +8). There are no prizes. 32 is what 前回の入賞者 lists the month
+  after (the cart asks for 32 rows), so that is what にゅうしょう means here. The qualifier
+  bulletin and round now end the day before the final instead of at the end of the month; a
+  qualifier score entered later is refused by the cart itself (すでに しめきりが すぎていました 707).
+- **Results.** A round's result is its final ranking: the players with both scores, by total.
+  前回の入賞者 (type 13, then 11) lists last month's, numbered 1位, 2位, … with prefecture;
+  歴代ワールドランキング (type 14) lists the 32 best final totals of all past rounds with the round
+  in its TOUR column (the manual says it ranks final scores). A round nobody finished the final
+  of has no result: 前回の入賞者 shows an empty list for it. That includes rounds 1 and 2 if they
+  end before this is deployed. Their qualifier entries stay in the server's data but are no
+  longer listed (until now both lists showed qualifier scores).
+- **Refusals with no screen of their own.** A final entry when no final is running, a qualifier
+  entry after the qualifier has closed (only a cart holding a round with other dates can send
+  one), and あなたの順位 for a player the server has no final score from are answered with
+  status 2: もくてきの データが みつかりませんでした 712.
+- **Worker only:** a final takes at most 200 players (more than 100 can only qualify through a
+  tie; beyond 200 the answer is 715), and a final entry over the per-address write limit is
+  answered with status 3 (サーバーが こんざつしています), so the cart keeps the score.
+
+What the server keeps: `scores` (round → member → best qualifier score, in entry order) and
+`finals` (round → member → the one or two final scores, in the order the totals were reached)
+in `data/nclassic.json`, the same in the Worker's state row.
+
+Status replies seen in the game (2026-11-27, as the reply to type 12): 1 データベースに エラーが
+はっせいしました, 2 もくてきの データが みつかりませんでした 712, 3 サーバーが こんざつしています,
+4 メンバーかくにんが できませんでした 709, 5 きたいしたデータを うけとれませんでした, 6 この
+ハンドルネームでは うけつけられませんでした, 7 うけつけにんずうを こえたため とうろくが できません 715,
+8 and 9 as 5. (Where no number is given, the screenshot was taken before it appeared.)
+
+**Seen in the game (2026-11-27)**, with the server's date fixed by `NC_TODAY`:
+
+- One cart across the two stages: on 2026-11-17 it registered, downloaded the round, entered +5
+  (a score written into the save, as in `wcentry`) and was shown 6位 among five seeded players.
+  With the server moved to 2026-11-24 and the same save: あなたの順位 still 6位 (type 7);
+  ワールドランキング the final's list (type 11); 今回のコース the final bulletin (けっしょう,
+  26/11/23~26/11/30, 32い…), the three warnings and the download (`05 02 00 00 00 04 00`);
+  エントリー with +3 (types 4, 12), then あなたの順位 "5位（ざんてい）" (type 10); a second entry
+  of −1, then "3位" and a ranking of 1 C −3, 2 B +1 (one round), 3T A +2, 3T E +2, 3T あ +2;
+  the cart's own total (+0x106) was +2 and it refused a third entry.
+- A cart ranked 101st of 101 (100 seeded players ahead): 101位 in the qualifier week and again
+  in the final week, the final round downloaded, the entry refused with 715, the score still
+  on the cart (+0xFE) and no final entry counted (+0x104 = 0).
+- A cart with no qualifier entry: refused by the cart, no request (server log).
+- A cart with the qualifier's round and a new score on 2026-11-24: 707 from the cart (only the
+  clock was asked). With the round's end date changed in the save to the 30th it sent type 9
+  and got 712.
+- 2026-11-30 (a fifth Monday) with the final round of the 24th on the cart: 今回のコース → 708.
+- あなたの順位 with a final entry on the cart but none on the server: 712. With none on the
+  cart: げんざいのツアーには エントリーされていません (from the cart).
+- 2026-12-08: 前回の入賞者 showed 第2回 1位 C −3 ほっかいどう, 2位 A +2 とうきょう, 3位 E +2 おきなわ
+  (the player with one round was not listed), and 歴代ワールドランキング 1 A −5 (tour 1), 2 C −3
+  (2), 3 D +1 (1), 4T A +2 (2), 4T E +2 (2).
+
+Not known, and not needed for the above: what the other 0x26 bytes of the type-10 record and
+the bytes of the type-11 record between the fields held (dates, a member ID?). The cart shows
+none of them.
 
 After every command the library leaves its result at SRAM 0x50B0 (word): 0 after success, else
 the error number shown (0x2C1 = 705, 0x2C4 = 708, 0x2C7 = 711). SRAM 0x3941 holds the command.
@@ -296,7 +417,10 @@ procedure from the table at `A000:12AF`.
 
 Probe hooks in the server (environment): `NC_REC=type=hexbody|hexbody,...` answers exact
 records, `NC_PROBE=type:count` marker records, `NC_ZERO`/`NC_COURSE` zeroed rounds,
-`NC_ROUND_PATCH=OFF:hex,...` patches the round.
+`NC_ROUND_PATCH=OFF:hex,...` patches the round. Test hook (Python only): `NC_TODAY=yyyy-mm-dd`
+fixes the server's date, for the tour's week and for the type-4 clock (the time of day stays
+real). Without it the date is Japan's, as in the Worker (it used to be the machine's own date,
+while the clock was already Japan time).
 
 Also present: `POST /cgi-bin/kakin.cgi` and the charge layer (service `BAN00C01`) for paid
 entries, with HTTP on port 80.
@@ -314,10 +438,36 @@ after `wclassic`, SRAM 0x50B0 = `00 00`, SRAM 0xACF (the saved round) is not `00
 SRAM 0x3945 = `80 00` (the list row's name) and SRAM 0x3B45 starts `84 21 24 B2 00 00 03 00`
 (the unpacked shot); a failed list leaves 0x3945 zero, a failed fetch leaves 0x3B45 zero.
 
+The final's replays (2026-11-27), each with a seed folder in `emu/seeds/` holding the server's
+state and a `server.env` that fixes the date. All start from power-on:
+
+- `wcfinal` (2026-11-30, a fifth Monday): registers, reads the final bulletin and downloads the
+  final round, enters two scores (+3, −1), asks its rank after each and opens the ranking. The
+  cart's record of a qualifier entry (tour save +0x102, +0x106) and the two scores are written
+  into the save; the seed holds the matching qualifier score. Afterwards SRAM 0xBD1 =
+  `01 00 02 00 02 00` (one qualifier entry, two final entries, total +2), 0x5203 = `03 00` and
+  0x521F = `01 00` (rank 3, not provisional), and the ranking's rows are at 0x3B45.
+- `wcfinalno` (2026-11-24): the same with 100 players ahead in the qualifier. The entry is
+  refused: SRAM 0x50B0 = `CB 02` (715), the score still at 0xBCD, 0xBD3 = `00 00`.
+- `wcwinners` (2026-12-08): 前回の入賞者 and 歴代ワールドランキング from the finals in the seed
+  (the rows at 0x5201 and 0x3B45).
+
+The five older replays have a `server.env` too (2026-11-10, a qualifying week): without it they
+would run into the final on some days, where `wcentry`'s cart has no qualifier entry. With
+corrupted replies, and against the server as it was before the final, the three new ones fail.
+
 Nothing in `captures/` covers this protocol: the server does not save port-10000 traffic, so
 the Python server and the Worker are not compared on it by the capture test. On 2026-11-26 the
 two were compared by hand on 126 requests (the game's own from these sessions plus a few made
-up) on six dates, and replied the same.
+up) on six dates, and replied the same. On 2026-11-27 they were compared again with the
+Worker's `NclassicSession` run under Node (its clock fixed, its D1 row held in memory) against
+`nclassic.answer` with `NC_TODAY`: 1846 requests on 13 dates (qualifying weeks, the first and
+last days of a final, a fifth Monday, a one-day final, the 1st of the next month) from three
+starting states, covering every type the game sends and each refusal. The replies and the state
+left behind were the same. The Worker's own limits (rate limit, 200 players in a final) were
+not exercised.
 
-Not verified: the card change and the empty shot list on a real console; hole 18 on screen; the
-final's requests beyond what is listed above; types 13, 11 and 14 were not re-run this time.
+Not verified: anything on a real console (the card change, the empty shot list, the final);
+hole 18 on screen; error 706 (an entry before a stage's start date, from the code); a final
+with more than a handful of players in the game (the 32-row lists were only seen with up to 6
+rows); the Worker's final against the real D1.

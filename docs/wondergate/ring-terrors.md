@@ -27,6 +27,7 @@ So neither game can show an error for a bad reply. Each reply below was sent to 
 | 404 with 7 lines | same | not tried: by the code, the clock comes from the body's bytes 2–4 whatever the status |
 | fewer than 7 lines, then closed | same | same screen, **clock not set** (`[0xAA5]` stays 0) |
 | fewer than 7 lines, connection left open | same, after 2 s per missing read | same screen, **wrong clock** (the block read comes back empty and the `FF` fill is used) |
+| the same, with the adapter of 2026-11-27 (one line, then nothing) | same, after the game's own 4.96 s wait for the missing line | same screen, clock not set: the game stops reading at the first line that doesn't come |
 | more than 7 lines (one extra header) | same | same screen, **wrong clock** (bytes 2–4 of `CR LF T 2 …`) |
 | nothing at all, then closed | same | same screen, clock not set |
 | a line or body of 127 bytes or more | same | same screen; clock right if the 7 lines were right |
@@ -41,10 +42,34 @@ normally, but the real socket is left to the hang-up. Keep every line and the bo
 
 **Terrors 2 needs exactly six header lines and the blank line**, with the body arriving in the
 eighth read. The Python server and the Worker both send status, `Server`, `Cache-Control`,
-`Connection`, `Content-Type`, `Content-Length`, blank. A reply that starts more than 2 s after the
-request also breaks it: our adapter answers a read with "nothing yet" after 2 s, the game counts
-that as a line, and the clock is read one line early (tried with a 3 s delay: sent p.m. 11:59, the
-game kept p.m. 2:02). The fix for that belongs in the adapter, not here.
+`Connection`, `Content-Type`, `Content-Length`, blank. A reply that started more than 2 s after the
+request also broke it until 2026-11-27: the adapter answered a read with "nothing yet" after 2 s,
+the game counts that as a line, and the clock was read one line early (tried with a 3 s delay: sent
+p.m. 11:59, the game kept p.m. 2:02). The adapter now waits as long as the game asks, below.
+
+## How long the reply may take (2026-11-27)
+
+Both games send `05` as the third byte of every line and block read (ROM `0x34CFC7` / `0x34E9FF`),
+and wait `0x177` = 375 frames (4.96 s) for the adapter's answer to it. The adapter now takes that
+byte as the wait in seconds and holds its "nothing yet" back that long
+([what that rests on, and every platform](../../wondergate/README.md#the-games-receive-wait)).
+Tried in Terrors 2 with the server started as `T2_TIME=23:59` and a proxy holding its reply back:
+
+| The reply starts | `[0xAA5]`..`[0xAA8]` after the session | |
+|---|---|---|
+| at once, 3 s late, 4.5 s late | `02 00 CF 02` (p.m. 11:59) | right, and at the same frame in all three |
+| 3 s late, adapter as it was before | `02 00 7A 00` (p.m. 2:02) | the old fault |
+| 6 s late, or never | `00 00 00 00` | the game gives up after its own 4.96 s and goes on to shutdown, close, hang-up and power-off, all answered; the adapter's late "nothing yet" is not delivered |
+
+The 3 s case was also run with the adapter's sockets going through the tunnel
+(`emu/tunnel_phone.py`), with the same result. The screen is データを受信しました in every row, as
+the table above says: the game has no error for a reply it could not use. So a reply that starts
+more than 5 s after the request leaves the clock as it was, on any adapter that does what the game
+asks; the game's own wait ends first. Ring Infinity uses the same reader and passes its replay; its
+late cases were not run, since it never uses the reply.
+
+Not in the regression yet: a slow-reply replay needs the server to delay its answer, and
+`access.py` has no hook for that.
 
 How to tell from memory that a session went through:
 
